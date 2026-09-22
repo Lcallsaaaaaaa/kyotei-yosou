@@ -141,7 +141,16 @@ async function syncDay(date, withRacers) {
 async function syncCommon() {
   const docs = [['results/30', call('/api/v1/results?days=30')]]
   for (let j = 1; j <= 24; j++) docs.push([`venue/${j}`, call(`/api/v1/venue?jcd=${j}`)])
+  // 選手一覧と、直近180日に出走した全選手のページ（日和の「選手一覧」にあたる）。1日1回
+  const list = call('/api/v1/racers')
+  docs.push(['racers', list])
   await put(docs)
+  const rd = []
+  for (const r of list?.racers ?? []) {
+    rd.push([`racer/${r.racer_id}`, call(`/api/v1/racer?id=${r.racer_id}`)])
+    if (rd.length >= 100) { await put(rd.splice(0)) }
+  }
+  await put(rd)
 }
 async function syncMeta(dates) {
   await put([['meta', { site: '凪の予想配信', dates, updated_at: jst().toISOString().replace('T', ' ').slice(0, 16) }]])

@@ -81,7 +81,7 @@ function entriesOf(db, date) {
   return cached('ent|' + date, 6 * HOUR, () => {
     const out = new Map()
     const rows = db.prepare(`SELECT race_id, lane, racer_id, racer_name, age, branch, weight, grade,
-      win_rate_nat, top2_nat, win_rate_loc, top2_loc, motor_no, motor_top2, boat_no, boat_top2
+      win_rate_nat, top2_nat, win_rate_loc, top2_loc, motor_no, motor_top2, boat_no, boat_top2, series_result
       FROM programs WHERE race_id BETWEEN ? AND ? ORDER BY race_id, lane`).all(ymd(date) + '-', ymd(date) + '-~')
     // ⚠ programs.racer_name は4文字固定幅で長い名前が切れる。racer_period から引く（racecard.mjs と同じ）
     const qN = db.prepare(`SELECT name, kana FROM racer_period WHERE racer_id=? AND period<=? ORDER BY period DESC LIMIT 1`)
@@ -119,7 +119,7 @@ function entriesOf(db, date) {
         win_rate_national: r.win_rate_nat, top2_rate_national: r.top2_nat,
         win_rate_local: r.win_rate_loc, top2_rate_local: r.top2_loc,
         motor_no: r.motor_no, motor_top2_rate: r.motor_top2, boat_no: r.boat_no, boat_top2_rate: r.boat_top2,
-        avg_st: x.avg_st ?? null, f_count: x.f_count ?? 0,
+        avg_st: x.avg_st ?? null, f_count: x.f_count ?? 0, series_result: r.series_result ?? null,
       })
     }
     return out
@@ -280,8 +280,18 @@ function buildRace(db, date, id, ctx, full) {
   const top2 = new Map((pr?.top2 ?? []).map((b) => [b.lane, b.p]))
   return {
     ...base,
-    entries: ents.map((e) => ({ ...e, win_probability: r1(byLane.get(e.lane)), top2_probability: r1(top2.get(e.lane)),
-      before: beforeOf(e.lane) })),
+    entries: ents.map((e) => {
+      // ★日和の「基本情報・枠別情報・モータ情報・今節成績」にあたるもの（2026-09-23）
+      const rc = e.racer_id ? racerOf(db, e.racer_id) : null
+      const b = beforeOf(e.lane)
+      const course = b?.start_course ?? e.lane            // 展示の進入が分かればそのコース、無ければ枠
+      const cs = rc?.by_course.find((c) => c.course === course) ?? null
+      return { ...e, win_probability: r1(byLane.get(e.lane)), top2_probability: r1(top2.get(e.lane)), before: b,
+        stats_1y: rc ? { ...rc.summary_1y, titles_since_2022: rc.titles_since_2022, maezuke_rate: rc.maezuke.inward_rate } : null,
+        course_stats: cs ? { course, ...cs } : null,
+        motor: motorOf(db, jcd, e.motor_no, date),
+        konsetsu: e.racer_id ? konsetsuOf(db, e.racer_id, jcd, meta.series ?? pr?.series ?? null, date, e.series_result) : null }
+    }),
     // 水面気象。wind_dir は公式の風向図の番号（1〜16、17は無風）。status=partial は展示前
     conditions: br ? { weather: br.weather, air_temp: br.air_temp, water_temp: br.water_temp, wind_speed: br.wind_speed,
       wind_dir: br.wind_dir, wave: br.wave, before_info: br.status === 'ok' ? '展示まで取得済み' : '展示前',
@@ -347,32 +357,187 @@ function resultsSummary(db, days) {
 }
 
 // ---------- 選手 ----------
+// ★2026-09-23に厚くした（本人：選手データが少なすぎる。日和と同じ構成に）。
+//   出走履歴（2022-08〜）を1回で読み、JSで全部集計する。1人0.1〜0.3秒。1日6時間覚えておく。
+//   事故：F（フライング）・L0/L1（出遅れ）・S0/S1/S2（失格・転覆など）。K0/K1 は欠場なので事故に数えない。
+//   優勝戦・準優勝戦はレース名（races.title）で見分ける。「優勝戦」を含む＝優出、そこで1着＝優勝。
+const isYusho = (t) => /優勝戦/.test(t ?? '') && !/準優/.test(t ?? '')
+const isJunyu = (t) => /準優勝戦/.test(t ?? '')
+const band = (dl) => (!dl ? null : dl < '12:00' ? '朝（〜12時）' : dl < '17:00' ? '昼（12〜17時）' : '夜（17時〜）')
+function agg(rows) {
+  const n = rows.length
+  const done = rows.filter((x) => x.rank_num >= 1 && x.rank_num <= 6)
+  const st = rows.filter((x) => x.st > 0 && x.st < 1)
+  const str = rows.filter((x) => x.st_rank != null)
+  return {
+    starts: n,
+    win_rate: pct(done.filter((x) => x.rank_num === 1).length, n),
+    top2_rate: pct(done.filter((x) => x.rank_num <= 2).length, n),
+    top3_rate: pct(done.filter((x) => x.rank_num <= 3).length, n),
+    avg_st: st.length ? r2(st.reduce((a, x) => a + x.st, 0) / st.length) : null,
+    avg_st_rank: str.length ? Math.round(str.reduce((a, x) => a + x.st_rank, 0) / str.length * 100) / 100 : null,
+  }
+}
 function racerOf(db, id) {
-  return cached('racer|' + id + '|' + today(), 6 * HOUR, () => {
-    const p = db.prepare(`SELECT period, name, kana, branch, grade, birth, sex, age, height, weight, win_rate, top2_rate, w1, w2, starts
-      FROM racer_period WHERE racer_id=? ORDER BY period DESC LIMIT 1`).get(id)
+  return cached('racer2|' + id + '|' + today(), 6 * HOUR, () => {
+    const periods = db.prepare(`SELECT period, name, kana, branch, grade, birth, sex, age, height, weight, blood,
+      win_rate, top2_rate, w1, w2, starts FROM racer_period WHERE racer_id=? ORDER BY period DESC`).all(id)
+    const p = periods[0]
     if (!p) return null
-    const from = addDays(today(), -365)
-    const course = db.prepare(`SELECT e.course, COUNT(*) n, SUM(e.rank_num=1) w, SUM(e.rank_num<=2) t2, SUM(e.rank_num<=3) t3,
-      AVG(CASE WHEN e.st>0 AND e.st<1 THEN e.st END) st
-      FROM entries e JOIN races r ON r.race_id=e.race_id WHERE e.racer_id=? AND r.date>=? AND e.course BETWEEN 1 AND 6
-      GROUP BY e.course ORDER BY e.course`).all(id, from)
-    const moves = db.prepare(`SELECT r.kimarite k, COUNT(*) n FROM entries e JOIN races r ON r.race_id=e.race_id
-      WHERE e.racer_id=? AND r.date>=? AND e.rank_num=1 AND r.kimarite IS NOT NULL GROUP BY r.kimarite ORDER BY n DESC`).all(id, from)
-    const recent = db.prepare(`SELECT r.date, r.jcd, r.race_no, e.lane, e.course, e.st, e.st_flag, e.rank, e.rank_num, r.kimarite
-      FROM entries e JOIN races r ON r.race_id=e.race_id WHERE e.racer_id=? ORDER BY r.date DESC, r.race_no DESC LIMIT 20`).all(id)
-    const wins = moves.reduce((a, x) => a + x.n, 0)
+    const rows = db.prepare(`SELECT e.race_id, e.lane, e.course, e.st, e.st_flag, e.rank, e.rank_num, e.motor_no, e.exhibition,
+      r.date, r.jcd, r.race_no, r.title, r.grade, r.series, r.kimarite, r.deadline, r.wave, r.wind_speed
+      FROM entries e JOIN races r ON r.race_id=e.race_id WHERE e.racer_id=? ORDER BY r.date DESC, r.race_no DESC`).all(id)
+    const from1y = addDays(today(), -365)
+    const y1 = rows.filter((x) => x.date >= from1y && x.rank !== 'K0' && x.rank !== 'K1')
+    // ST順位（同じレースの6艇の中で何番目に速かったか）。直近1年ぶんだけ同じレースの他艇を読む
+    const ids = [...new Set(y1.map((x) => x.race_id))]
+    const stBy = new Map()
+    for (let i = 0; i < ids.length; i += 400) {
+      const ch = ids.slice(i, i + 400)
+      for (const e of db.prepare(`SELECT race_id, lane, st FROM entries WHERE race_id IN (${ch.map(() => '?').join(',')}) AND st>0 AND st<1`).iterate(...ch)) {
+        if (!stBy.has(e.race_id)) stBy.set(e.race_id, []); stBy.get(e.race_id).push(e)
+      }
+    }
+    for (const x of y1) {
+      const a = stBy.get(x.race_id)
+      if (a && x.st > 0 && x.st < 1) x.st_rank = a.filter((o) => o.st < x.st).length + 1
+    }
+    // コース別（1コースは負け方、2〜6コースは勝ち方も）
+    const by_course = [1, 2, 3, 4, 5, 6].map((c) => {
+      const rs = y1.filter((x) => x.course === c)
+      if (!rs.length) return null
+      const wins = rs.filter((x) => x.rank_num === 1)
+      const kmCount = (arr) => { const m = new Map(); for (const x of arr) if (x.kimarite) m.set(x.kimarite, (m.get(x.kimarite) ?? 0) + 1); return [...m].sort((a, b) => b[1] - a[1]).map(([k, n]) => ({ kimarite: k, count: n, rate: pct(n, rs.length) })) }
+      const o = { course: c, ...agg(rs), wins_by_kimarite: kmCount(wins) }
+      if (c === 1) {
+        // 1コースで負けたとき、1着艇が何で勝ったか＝差された・まくられた・まくり差された
+        const lost = rs.filter((x) => x.rank_num > 1 && x.rank_num <= 6)
+        const how = (k) => pct(lost.filter((x) => x.kimarite === k).length, rs.length)
+        o.escape_rate = pct(wins.filter((x) => x.kimarite === '逃げ').length, rs.length)
+        o.lost_to = { '差され': how('差し'), 'まくられ': how('まくり'), 'まくり差され': how('まくり差し'),
+          '抜かれ・恵まれ': pct(lost.filter((x) => x.kimarite === '抜き' || x.kimarite === '恵まれ').length, rs.length) }
+      }
+      o.recent = rs.slice(0, 5).map((x) => ({ date: x.date, venue: VENUE[x.jcd], race_no: x.race_no, st: x.st, rank: x.rank_num ?? x.rank }))
+      return o
+    }).filter(Boolean)
+    // 場別・グレード別・時間帯別・波別
+    const group = (keyOf) => { const m = new Map(); for (const x of y1) { const k = keyOf(x); if (k == null) continue; if (!m.has(k)) m.set(k, []); m.get(k).push(x) } return m }
+    const by_venue = [...group((x) => x.jcd)].sort((a, b) => a[0] - b[0]).map(([j, rs]) => ({ jcd: j, venue: VENUE[j], ...agg(rs) }))
+    const by_grade = [...group((x) => x.grade ?? '一般')].map(([g, rs]) => ({ grade: g, ...agg(rs) })).sort((a, b) => b.starts - a.starts)
+    const by_time = [...group((x) => band(x.deadline))].map(([b, rs]) => ({ band: b, ...agg(rs) }))
+    const by_wave = [...group((x) => (x.wave == null ? null : x.wave >= 5 ? '波5cm以上' : '波5cm未満'))].map(([b, rs]) => ({ band: b, ...agg(rs) }))
+    // タイトル（2022-08以降の手元の記録から）
+    const all = rows.filter((x) => x.rank !== 'K0' && x.rank !== 'K1')
+    const titles = (arr) => ({
+      yusho: arr.filter((x) => isYusho(x.title) && x.rank_num === 1).length,
+      yushutsu: arr.filter((x) => isYusho(x.title)).length,
+      junyu: arr.filter((x) => isJunyu(x.title)).length,
+    })
+    const accidents = (arr) => ({
+      flying: arr.filter((x) => x.rank === 'F' || x.st_flag === 'F').length,
+      late: arr.filter((x) => /^L/.test(x.rank ?? '') || x.st_flag === 'L').length,
+      disqualified: arr.filter((x) => /^S/.test(x.rank ?? '')).length,
+    })
+    const acc = accidents(y1)
+    // 前づけ（枠より内のコースに入った）・外に出た
+    const withCourse = y1.filter((x) => x.course >= 1 && x.course <= 6)
+    const inward = withCourse.filter((x) => x.course < x.lane).length
+    const outward = withCourse.filter((x) => x.course > x.lane).length
+    // 節（同じ場・同じ開催名で日付が続いているもの）ごとの成績。新しい順
+    const series = []
+    for (const x of rows) {
+      const s = series.find((g) => g.jcd === x.jcd && g.series === x.series && addDays(x.date, 8) >= g.to)
+      if (s) { s.races.push(x); if (x.date < s.from) s.from = x.date } else { if (series.length >= 6) break; series.push({ jcd: x.jcd, series: x.series, grade: x.grade, from: x.date, to: x.date, races: [x] }) }
+    }
+    const series_recent = series.map((g) => {
+      const rs = [...g.races].sort((a, b) => a.date.localeCompare(b.date) || a.race_no - b.race_no)
+      const yu = rs.find((x) => isYusho(x.title))
+      return { venue: VENUE[g.jcd], jcd: g.jcd, series: g.series, grade: g.grade ?? '一般', from: g.from, to: g.to,
+        results: rs.map((x) => ({ date: x.date, race_no: x.race_no, title: x.title, lane: x.lane, course: x.course, st: x.st, rank: x.rank_num ?? x.rank })),
+        line: rs.map((x) => x.rank_num ?? (x.rank === 'F' ? 'F' : /^[SLK]/.test(x.rank ?? '') ? x.rank[0] : '-')).join(' '),
+        finals: yu ? (yu.rank_num === 1 ? '優勝' : `優出${yu.rank_num ?? ''}着`) : rs.some((x) => isJunyu(x.title)) ? '準優出' : null }
+    })
+    const moves = new Map()
+    for (const x of y1) if (x.rank_num === 1 && x.kimarite) moves.set(x.kimarite, (moves.get(x.kimarite) ?? 0) + 1)
+    const wins = [...moves.values()].reduce((a, b) => a + b, 0)
+    const todayRaces = db.prepare(`SELECT race_id, lane FROM programs WHERE racer_id=? AND race_id BETWEEN ? AND ? ORDER BY race_id`)
+      .all(id, ymd(today()) + '-', ymd(today()) + '-~')
     return {
       racer_id: id, name: p.name, kana: p.kana, branch: p.branch, class: p.grade, birth: p.birth, sex: p.sex, age: p.age,
-      height: p.height, weight: p.weight, period: p.period,
+      height: p.height, weight: p.weight, blood: p.blood, period: p.period,
       official: { win_rate: p.win_rate, top2_rate: p.top2_rate, firsts: p.w1, seconds: p.w2, starts: p.starts },
-      by_course: course.map((c) => ({ course: c.course, starts: c.n, win_rate: pct(c.w, c.n), top2_rate: pct(c.t2, c.n), top3_rate: pct(c.t3, c.n), avg_st: r2(c.st) })),
-      winning_moves: moves.map((m) => ({ kimarite: m.k, count: m.n, share: pct(m.n, wins) })),
-      recent: recent.map((x) => ({ date: x.date, venue: VENUE[x.jcd], race_no: x.race_no, lane: x.lane, course: x.course,
+      periods: periods.slice(0, 12).map((x) => ({ period: x.period, class: x.grade, win_rate: x.win_rate, top2_rate: x.top2_rate, starts: x.starts, firsts: x.w1, seconds: x.w2 })),
+      summary_1y: { ...agg(y1), accidents: acc, accident_rate: pct(acc.flying + acc.late + acc.disqualified, y1.length), ...titles(y1) },
+      titles_since_2022: titles(all),
+      by_course, by_venue, by_grade, by_time, by_wave,
+      maezuke: { starts: withCourse.length, inward, inward_rate: pct(inward, withCourse.length), outward, outward_rate: pct(outward, withCourse.length) },
+      winning_moves: [...moves].sort((a, b) => b[1] - a[1]).map(([k, n]) => ({ kimarite: k, count: n, share: pct(n, wins) })),
+      series_recent,
+      today: todayRaces.map((x) => ({ race_id: x.race_id, venue: VENUE[Number(x.race_id.slice(9, 11))], race_no: Number(x.race_id.slice(12, 14)), lane: x.lane })),
+      recent: rows.slice(0, 20).map((x) => ({ date: x.date, venue: VENUE[x.jcd], race_no: x.race_no, lane: x.lane, course: x.course,
         st: x.st, st_flag: x.st_flag, rank: x.rank_num ?? x.rank, kimarite: x.rank_num === 1 ? x.kimarite : null })),
-      period_note: '成績は直近1年の出走から当システムが集計（公式の期別成績とは期間が違う）',
+      period_note: '成績は出走履歴（2022年8月〜）から当システムが集計。「直近1年」は今日から365日。公式の期別成績とは期間が違う',
     }
   })
+}
+
+// ---------- 選手一覧 ----------
+function racerList(db) {
+  return cached('racers|' + today(), 12 * HOUR, () => {
+    const act = new Set(db.prepare(`SELECT DISTINCT racer_id FROM entries WHERE race_id >= ?`).all(ymd(addDays(today(), -180))).map((r) => r.racer_id))
+    const rows = db.prepare(`SELECT r.racer_id, r.name, r.kana, r.branch, r.grade, r.sex, r.age, r.win_rate, r.top2_rate FROM racer_period r
+      JOIN (SELECT racer_id, MAX(period) mp FROM racer_period GROUP BY racer_id) m ON m.racer_id=r.racer_id AND m.mp=r.period`).all()
+    return rows.filter((r) => act.has(r.racer_id)).sort((a, b) => (b.win_rate ?? 0) - (a.win_rate ?? 0))
+      .map((r) => ({ racer_id: r.racer_id, name: r.name, kana: r.kana, branch: r.branch, class: r.grade, sex: r.sex, age: r.age, win_rate: r.win_rate, top2_rate: r.top2_rate }))
+  })
+}
+
+// ---------- モーター ----------
+// ★モーターは場ごとに年1回入れ替わり、番号が使い回される。入れ替わりをまたいで数えると別物が混ざるので、
+//   番組表のモーター2連率がその場で一斉に小さくなった日（平均10%未満）を「今期の始まり」とみなす。
+function motorPeriodStart(db, jcd) {
+  return cached('mstart|' + jcd + '|' + today(), 24 * HOUR, () => {
+    const rows = db.prepare(`SELECT substr(race_id,1,8) d, AVG(motor_top2) a FROM programs
+      WHERE race_id >= ? AND substr(race_id,10,2)=? GROUP BY d ORDER BY d DESC`).all(ymd(addDays(today(), -450)), String(jcd).padStart(2, '0'))
+    const hit = rows.find((r) => r.a != null && r.a < 10)
+    const d = hit?.d ?? rows.at(-1)?.d
+    return d ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : addDays(today(), -365)
+  })
+}
+function motorOf(db, jcd, no, date) {
+  if (!no) return null
+  return cached(`motor|${jcd}|${no}|${date}`, 6 * HOUR, () => {
+    const since = motorPeriodStart(db, jcd)
+    const rows = db.prepare(`SELECT r.date, r.race_no, e.racer_id, e.racer_name, e.lane, e.course, e.rank, e.rank_num, e.exhibition
+      FROM entries e JOIN races r ON r.race_id=e.race_id
+      WHERE r.jcd=? AND e.motor_no=? AND r.date>=? AND r.date<? ORDER BY r.date DESC, r.race_no DESC`).all(jcd, no, since, date)
+    const s = (arr) => ({ starts: arr.length, win_rate: pct(arr.filter((x) => x.rank_num === 1).length, arr.length),
+      top2_rate: pct(arr.filter((x) => x.rank_num >= 1 && x.rank_num <= 2).length, arr.length),
+      top3_rate: pct(arr.filter((x) => x.rank_num >= 1 && x.rank_num <= 3).length, arr.length) })
+    const users = []
+    for (const x of rows) {
+      const u = users.find((v) => v.racer_id === x.racer_id && addDays(x.date, 8) >= v.to)
+      if (u) { u.results.unshift(x.rank_num ?? x.rank); if (x.date < u.from) u.from = x.date }
+      else if (users.length < 8) users.push({ racer_id: x.racer_id, name: x.racer_name, from: x.date, to: x.date, results: [x.rank_num ?? x.rank] })
+    }
+    const ex = rows.filter((x) => x.exhibition > 0).slice(0, 20)
+    return { motor_no: no, period_from: since, total: s(rows), last_30d: s(rows.filter((x) => x.date >= addDays(date, -30))),
+      avg_exhibition_recent: ex.length ? Math.round(ex.reduce((a, x) => a + x.exhibition, 0) / ex.length * 100) / 100 : null,
+      users: users.map((u) => ({ ...u, results: u.results.join(' ') })) }
+  })
+}
+
+// ---------- 今節 ----------
+function konsetsuOf(db, id, jcd, series, date, seriesResult) {
+  const rows = series ? db.prepare(`SELECT r.date, r.race_no, r.title, e.lane, e.course, e.st, e.st_flag, e.rank, e.rank_num, e.exhibition
+    FROM entries e JOIN races r ON r.race_id=e.race_id
+    WHERE e.racer_id=? AND r.jcd=? AND r.series=? AND r.date<? AND r.date>=? ORDER BY r.date, r.race_no`).all(id, jcd, series, date, addDays(date, -8)) : []
+  const done = rows.filter((x) => x.rank_num >= 1 && x.rank_num <= 6)
+  const st = rows.filter((x) => x.st > 0 && x.st < 1)
+  return { series_result: seriesResult ?? null, races: rows.map((x) => ({ date: x.date, race_no: x.race_no, title: x.title, lane: x.lane,
+      course: x.course, st: x.st, st_flag: x.st_flag, exhibition: x.exhibition, rank: x.rank_num ?? x.rank })),
+    top2_rate: pct(done.filter((x) => x.rank_num <= 2).length, rows.length), avg_st: st.length ? r2(st.reduce((a, x) => a + x.st, 0) / st.length) : null,
+    note: '前日までの今節成績（当日の分は series_result＝番組表の値）' }
 }
 
 // ---------- 場 ----------
@@ -415,7 +580,8 @@ const INDEX = {
     { path: '/api/v1/tenkai?date=YYYY-MM-DD', access: 'free', what: '全レースの展開予想（本線・対抗・決まり手の確率・一言）' },
     { path: '/api/v1/picks?date=YYYY-MM-DD', access: 'paid', what: 'その日に記録した買い目（2点プラン・4点・無料枠・B2）と的中' },
     { path: '/api/v1/results?days=30', access: 'free', what: '実績（日別・合計の的中率と回収率。外れた日も含む）' },
-    { path: '/api/v1/racer?id=NNNN', access: 'free', what: '選手（プロフィール・コース別成績・決まり手・直近20走）' },
+    { path: '/api/v1/racers', access: 'free', what: '選手一覧（直近180日に出走した全選手）' },
+    { path: '/api/v1/racer?id=NNNN', access: 'free', what: '選手（期別成績・直近1年の成績・コース別/場別/グレード別/時間帯別・1コースの逃げ率と負け方・前づけ・優勝/優出・事故・過去の節・本日の出走・直近20走）' },
     { path: '/api/v1/venue?jcd=1..24', access: 'free', what: '場（コース別1着率・決まり手・1コースの月別/レース番号別の強さ・平均配当）' },
     { path: '/plan2.json?date=YYYY-MM-DD', access: 'paid', what: 'note記事の自動生成用（3連複2点プラン）。status=empty なら記事を作らない' },
   ],
@@ -474,6 +640,7 @@ export function apiRoute(u, res) {
       const days = Math.min(365, Math.max(1, Number(u.searchParams.get('days') || 30)))
       return send(200, { ...stamp, ...resultsSummary(db, days) })
     }
+    if (p === '/api/v1/racers') return send(200, { ...stamp, note: '直近180日に出走した選手。勝率は最新の期別成績', racers: racerList(db) })
     if (p === '/api/v1/racer') {
       const id = Number(u.searchParams.get('id'))
       if (!id) return send(400, { error: 'id に登録番号を指定してください（例 4320）' })

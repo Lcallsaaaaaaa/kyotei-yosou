@@ -67,6 +67,10 @@ Webサイト（デザインはGPTで作る）・note記事の自動生成・将�
   `motor_no`／`motor_top2_rate`・`boat_no`／`boat_top2_rate`・`avg_st`（直近60走の平均ST）・`f_count`（過去180日のF回数）・
   `win_probability`（1着確率）・`top2_probability`（2着以内の確率）
 - **`entries[].before`**（直前情報・展示のあと）：`weight`（体重）・`adjust_weight`（調整重量）・`exhibition_time`（展示タイム）・`exhibition_rank`（展示タイムの順位）・`tilt`（チルト）・`parts_changed`（部品交換）・`start_course`（スタート展示の進入コース）・`start_st`（展示ST）・`start_flag`（`F`＝展示でのフライング、`L`＝出遅れ）。展示前は `null`
+- **`entries[].stats_1y`**（基本情報・直近1年）：`starts`・`win_rate`・`top2_rate`・`top3_rate`・`avg_st`・`avg_st_rank`（同じレース内のST順位の平均）・`accidents`（`flying`/`late`/`disqualified`）・`accident_rate`・`yusho`/`yushutsu`/`junyu`（優勝・優出・準優出）・`titles_since_2022`・`maezuke_rate`
+- **`entries[].course_stats`**（枠別情報）：今回入るコース（展示の進入、無ければ枠）での直近1年の成績。`wins_by_kimarite`、1コースなら `escape_rate`（逃げ率）と `lost_to`（差され・まくられ・まくり差され・抜かれ/恵まれの率）
+- **`entries[].motor`**（モータ情報）：`period_from`（今期の始まり＝モーター入れ替え）・`total`（今期の1着/2連/3連率）・`last_30d`・`avg_exhibition_recent`・`users`（過去の使用者と着順）
+- **`entries[].konsetsu`**（今節成績）：`series_result`（番組表の今節着順）・`races`（前日までの内訳）・`top2_rate`・`avg_st`
 - **`conditions`**（水面気象）：`weather`・`air_temp`・`water_temp`・`wind_speed`（m）・`wind_dir`（公式の風向図の番号 1〜16、17は無風）・`wave`（cm）・`before_info`（`展示まで取得済み`／`展示前`）・`fetched_at`
   当日は締切の20分前から公式の直前情報を取りに行き、展示が揃うまで数分おきに取り直します
 - **`tenkai`**（展開予想）：下の3.と同じ中身
@@ -119,11 +123,16 @@ Webサイト（デザインはGPTで作る）・note記事の自動生成・将�
 `hit` は結果前 `null`、当たり `true`、外れ `false`。`payout` は当たったときの払戻（100円あたり）。
 
 ## 6. 選手　`/api/v1/racer?id=登録番号`　（無料）
-選手ページに使う。例 `/api/v1/racer?id=4320`
+選手ページに使う。例 `/api/v1/racer?id=4320`。選手一覧は `/api/v1/racers`（直近180日に出走した全選手・勝率順）
 
-- プロフィール：`name`・`kana`・`branch`・`class`・`birth`・`sex`・`age`・`height`・`weight`・`period`（期）
-- `official`：公式の期別成績（`win_rate`・`top2_rate`・`firsts`・`seconds`・`starts`）
-- `by_course`：コース別（直近1年）の `starts`・`win_rate`・`top2_rate`・`top3_rate`・`avg_st`
+- プロフィール：`name`・`kana`・`branch`・`class`・`birth`・`sex`・`age`・`height`・`weight`・`blood`・`period`（期）
+- `official`：公式の期別成績／`periods`：直近12期の推移（級別・勝率・2連対率・出走・1着・2着）
+- `summary_1y`：直近1年の総合（3連対率・ST順位・事故・優勝/優出/準優）／`titles_since_2022`
+- `by_course`：コース別（成績・ST順位・勝ち方・直近5走。1コースは逃げ率と負け方）
+- `by_venue`（場別）・`by_grade`（グレード別）・`by_time`（朝/昼/夜）・`by_wave`（波5cm以上/未満）
+- `maezuke`：前づけ（枠より内へ）と外へ出た回数・率
+- `series_recent`：最近6節（期間・場・開催・着順の並び・優勝/優出/準優出）
+- `today`：本日の出走
 - `winning_moves`：勝った決まり手の内訳（直近1年）
 - `recent`：直近20走（日付・場・R・枠・コース・ST・着順・決まり手）
 
