@@ -32,3 +32,6 @@ Thumbs.db
 desktop.ini
 .env
 .env.*
+
+# 公開サイトの試し用データ（sync-public.mjs --local の書き出し）
+site/_local/

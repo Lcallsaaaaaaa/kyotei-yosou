@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>凪の予想配信｜競艇データと展開予想</title>
+<meta name="description" content="全国24場の出走表・直前情報・展開予想・結果と、AIの1着確率。的中実績は外れた日も含めて公開しています。">
+<meta name="theme-color" content="#0f5e61">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&family=Shippori+Mincho+B1:wght@700;800&display=swap">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%230f5e61'/><path d='M8 40c8-6 16-6 24 0s16 6 24 0' stroke='%23e9f1ef' stroke-width='5' fill='none' stroke-linecap='round'/></svg>">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#/"><span class="brand-mark" aria-hidden="true"></span><span class="brand-name">凪の予想配信</span></a>
+  <nav class="nav" aria-label="メニュー">
+    <a href="#/" data-nav="home">出走表</a>
+    <a href="#/tenkai" data-nav="tenkai">展開予想</a>
+    <a href="#/venues" data-nav="venues">場情報</a>
+    <a href="#/results" data-nav="results">実績</a>
+  </nav>
+</header>
+<main id="app" tabindex="-1"><p class="loading">読み込み中…</p></main>
+<footer class="foot">
+  <p><b>舟券の購入は20歳からです。</b></p>
+  <p>予想は的中を優先したもので、利益を約束するものではありません。回収率は100%未満です。</p>
+  <p>実績は締切前に出した予想だけを集計しています（外れた日も含みます）。</p>
+  <p>平均ST・F回数・コース別成績などは公式の値ではなく、出走履歴から当サイトが集計した参考値です。正式な情報は公式サイトでご確認ください。</p>
+  <p class="foot-updated" id="updated"></p>
+</footer>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
