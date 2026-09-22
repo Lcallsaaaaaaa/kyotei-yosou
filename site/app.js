@@ -91,7 +91,28 @@
         ${g}<span class="venue-series">${esc(r0.series ?? '')}${r0.day_no ? `　${r0.day_no}日目${r0.series_days ? '/' + r0.series_days : ''}` : ''}</span></div>
         <div class="races">${chips}</div></section>`
     }).join('')
-    view(`<h1>出走表 <span class="sub">${md(date)}(${wd(date)})・${byV.size}場 ${j.races.length}レース</span></h1>${tabs}${status}
+    // ガチガチ／穴レース・アラート（日和のトップにある特集）
+    const F = await doc(`features/${date}`)
+    const rlink = (x) => `<a href="#/race/${x.race_id}">${esc(x.venue)}${x.race_no}R</a> <span class="sub">${esc(x.deadline ?? '')}</span>`
+    const pick = (list, fn, n = 8) => list.filter((x) => !x.closed).slice(0, n).map(fn).join('') || '<li><span class="sub">該当なし（締切前のレース）</span></li>'
+    const feat = F ? `<div class="grid two" style="margin-top:12px">
+        <div class="panel"><b>ガチガチレース</b> <span class="sub">${esc(F.gachigachi.rule)}</span><ol class="rank">${pick(F.gachigachi.races, (x) =>
+          `<li><span>${rlink(x)}</span><span class="num">${waku(x.favorite.lane)} ${pct(x.favorite.win_probability)}</span></li>`)}</ol></div>
+        <div class="panel"><b>穴レース</b> <span class="sub">${esc(F.ana.rule)}</span><ol class="rank">${pick(F.ana.races, (x) =>
+          `<li><span>${rlink(x)}</span><span class="num">本命${waku(x.favorite.lane)} ${pct(x.favorite.win_probability)}</span></li>`)}</ol></div>
+      </div>
+      <h2>アラート <span class="sub">当日の直前情報から</span></h2>
+      <div class="grid two">
+        <div class="panel"><b>まくりアラート</b> <span class="sub">${esc(F.alerts.rules.makuri)}</span><ol class="rank">${pick(F.alerts.makuri, (x) =>
+          `<li><span>${rlink(x)}</span><span class="num">${waku(x.lane)} 展示${dash(x.exhibition_time)}（1号艇より${dash(x.diff)}秒速い）</span></li>`)}</ol></div>
+        <div class="panel"><b>前づけアラート</b> <span class="sub">${esc(F.alerts.rules.maezuke)}</span><ol class="rank">${pick(F.alerts.maezuke, (x) =>
+          `<li><span>${rlink(x)}</span><span class="num">${waku(x.lane)} ${esc(x.name ?? '')} → ${x.course}コース</span></li>`)}</ol></div>
+        <div class="panel"><b>チルト跳アラート</b> <span class="sub">${esc(F.alerts.rules.tilt)}</span><ol class="rank">${pick(F.alerts.tilt, (x) =>
+          `<li><span>${rlink(x)}</span><span class="num">${waku(x.lane)} ${esc(x.name ?? '')} ${x.previous_tilt != null ? dash(x.previous_tilt, 1) + '→' : ''}${dash(x.tilt, 1)}</span></li>`)}</ol></div>
+        <div class="panel"><b>スタートアラート</b> <span class="sub">${esc(F.alerts.rules.start)}</span><ol class="rank">${pick(F.alerts.start, (x) =>
+          `<li><span>${rlink(x)}</span><span class="num">${waku(x.outer_lane)}が${waku(x.inner_lane)}より${dash(x.diff)}秒速い</span></li>`)}</ol></div>
+      </div>` : ''
+    view(`<h1>出走表 <span class="sub">${md(date)}(${wd(date)})・${byV.size}場 ${j.races.length}レース</span></h1>${tabs}${feat}${status}
       <h2>レース一覧</h2><div class="grid">${venues}</div>
       <p class="note">「無料」の付いたレースは、1着確率80%以上の本命を単勝1点で無料公開しています。橙の枠は次に締め切るレースです。</p>`)
   }
@@ -189,17 +210,44 @@
         if (R.cancelled) return '<p class="empty">このレースは中止・順延になりました。</p>'
         if (!R.result) return '<p class="empty">結果はまだです。</p>'
         const x = R.result
-        return `<div class="panel"><div class="race-head"><span class="shape">${x.order.split('-').map((l) => waku(l)).join(' ')}</span>
+        const order = (x.order_all ?? x.order).split('-')
+        const P = x.payouts ?? { '単勝': { amount: x.win_payout }, '3連単': { amount: x.trifecta_payout }, '3連複': { amount: x.trio_payout } }
+        const KIND = ['3連単', '3連複', '2連単', '2連複', '拡連複', '単勝', '複勝']
+        const rows = KIND.filter((k) => P[k]).flatMap((k) => (Array.isArray(P[k]) ? P[k] : [P[k]]).map((v, i) =>
+          `<tr><td class="l">${i ? '' : k}</td><td class="l">${esc(v.combo ?? '')}</td><td>${yen(v.amount)}</td></tr>`)).join('')
+        return `<div class="panel"><div class="race-head"><span class="shape">${order.map((l, i) => `<span class="sub">${i + 1}着</span>${l === '-' ? '―' : waku(l)}`).join(' ')}</span>
           ${x.kimarite ? `<span class="badge">${esc(x.kimarite)}</span>` : ''}</div>
-          <div class="scroll" style="margin-top:10px"><table><tbody>
-          <tr><td class="l">単勝</td><td>${yen(x.win_payout)}</td></tr>
-          <tr><td class="l">3連単</td><td>${yen(x.trifecta_payout)}</td></tr>
-          <tr><td class="l">3連複</td><td>${yen(x.trio_payout)}</td></tr></tbody></table></div>
-          <p class="note">結果の元：${esc(x.source)}（当日は速報、翌日に競走成績で確定）</p></div>`
+          <div class="scroll" style="margin-top:10px"><table><thead><tr><th class="l">券種</th><th class="l">組番</th><th>払戻</th></tr></thead><tbody>${rows}</tbody></table></div>
+          <p class="note">結果の元：${esc(x.source)}（当日は速報、翌日に競走成績で確定）。払戻は100円あたり</p></div>`
+      },
+      // オッズ（締切前の最新、終わったレースは確定）
+      odds: () => {
+        const o = R.odds
+        if (!o) return '<p class="empty">オッズはまだありません（締切の約20分前から入ります）。</p>'
+        const tri = (obj, a) => [1, 2, 3, 4, 5, 6].filter((b) => b !== a)
+        const t3 = o.trifecta ? `<h2>3連単</h2><div class="scroll"><table><thead><tr><th class="l">1着</th><th class="l">2着-3着：オッズ</th></tr></thead><tbody>${
+          [1, 2, 3, 4, 5, 6].map((a) => `<tr><td class="l">${waku(a)}</td><td class="l" style="white-space:normal">${tri(o.trifecta, a).flatMap((b) => [1, 2, 3, 4, 5, 6].filter((c) => c !== a && c !== b)
+            .map((c) => `<span style="display:inline-block;min-width:92px">${b}-${c} <b>${dash(o.trifecta[`${a}-${b}-${c}`], 1)}</b></span>`)).join('')}</td></tr>`).join('')}</tbody></table></div>` : ''
+        const list = (obj, sep, title) => obj ? `<h2>${title}</h2><div class="panel" style="display:flex;flex-wrap:wrap;gap:6px 14px">${Object.entries(obj)
+          .sort((a, b) => a[1] - b[1]).map(([k, v]) => `<span class="num">${esc(k.split('-').join(sep))} <b>${dash(v, 1)}</b></span>`).join('')}</div>` : ''
+        return `<p class="note">${esc(o.kind)}のオッズ${o.taken_at ? `（${esc(o.taken_at)}・締切${o.minutes_before}分前）` : ''}。${esc(o.note ?? '')}</p>
+          ${o.win?.length ? `<h2>単勝・複勝</h2><div class="scroll"><table><thead><tr><th class="l">枠</th><th>単勝</th><th>複勝</th></tr></thead><tbody>${
+            o.win.map((w, i) => `<tr><td class="l">${waku(w.lane)}</td><td>${dash(w.odds, 1)}</td><td>${o.place?.[i] ? dash(o.place[i].low, 1) + (o.place[i].high ? '〜' + dash(o.place[i].high, 1) : '') : '―'}</td></tr>`).join('')}</tbody></table></div>
+            ${o.win_taken ? `<p class="note">単勝・複勝：${esc(o.win_taken)}</p>` : ''}` : ''}
+          ${list(o.trio, '=', '3連複（人気順）')}${list(o.exacta, '-', '2連単（人気順）')}${list(o.quinella, '=', '2連複（人気順）')}${t3}`
+      },
+      // 出目ランク（この場・このレース番号の直近1年）
+      demoku: () => {
+        const d = R.demoku
+        if (!d?.races) return '<p class="empty">データがありません。</p>'
+        return `<p class="note">${esc(R.venue)}の${R.race_no}R・${esc(d.period)}の${d.races}レース</p>
+          <div class="grid two"><div><h2>よく出た3連単</h2><div class="scroll"><table><thead><tr><th class="l">順位</th><th class="l">組番</th><th>回数</th><th>出現率</th></tr></thead><tbody>${
+            d.trifecta_top.map((x, i) => `<tr><td class="l">${i + 1}</td><td class="l">${x.combo.split('-').map((l) => waku(l)).join('')}</td><td>${x.count}</td><td>${pct(x.rate)}</td></tr>`).join('')}</tbody></table></div></div>
+          <div><h2>1着の枠</h2><div class="panel km">${d.first_by_lane.map((x) => `<span>${waku(x.lane)}</span><i style="width:${Math.max(2, x.rate)}%"></i><span class="num">${pct(x.rate)}</span>`).join('')}</div></div></div>`
       },
     }
     const TABS = [['card', '出走表'], ['basic', '基本情報'], ['waku', '枠別情報'], ['motor', 'モータ'], ['konsetsu', '今節'],
-      ['before', '直前情報'], ['tenkai', '展開予想'], ['result', '結果']]
+      ['before', '直前情報'], ['odds', 'オッズ'], ['tenkai', '展開予想'], ['demoku', '出目'], ['result', '結果']]
     tab = TABS.some(([k]) => k === tab) ? tab : (R.result ? 'result' : 'card')
     view(`<div class="race-head"><h1>${esc(R.venue)} ${R.race_no}R</h1><span class="sub">${md(R.date)}(${wd(R.date)}) 締切 ${esc(R.deadline ?? '―')}</span>${state}</div>
       <div class="sub">${esc(R.title ?? '')}　${esc(R.series ?? '')}${R.day_no ? `　${R.day_no}日目` : ''}</div>${conds}
@@ -276,6 +324,7 @@
     const S = P.summary_1y, A = S.accidents, T2 = P.titles_since_2022
     const c1 = P.by_course.find((c) => c.course === 1)
     view(`<h1>${esc(P.name)} ${cls(P.class)}</h1><div class="sub">${esc(P.kana ?? '')}　登番${P.racer_id}　${esc(P.branch ?? '')}支部　${P.age ?? ''}歳　${P.height ?? ''}cm/${P.weight ?? ''}kg　${esc(P.blood ?? '')}型</div>
+      ${P.upcoming?.length ? `<div class="panel" style="margin-top:12px"><b>出場予定</b>${P.upcoming.map((m) => `<div><a href="#/meeting/${m.jcd}/${m.start_date}">${md(m.start_date)}〜${md(m.end_date)} ${esc(m.venue)}</a> ${gradeBadge(m.grade)} <span class="sub">${esc(m.title)}</span></div>`).join('')}</div>` : ''}
       ${P.today?.length ? `<div class="panel freepick" style="margin-top:12px"><b>本日の出走</b>　${P.today.map((t) => `<a href="#/race/${t.race_id}">${esc(t.venue)}${t.race_no}R（${t.lane}号艇）</a>`).join('　')}</div>` : ''}
       <div class="stats" style="margin-top:12px">
         <div class="stat"><span>勝率（${esc(P.period ?? '')}期）</span><b>${dash(P.official.win_rate)}</b></div>
@@ -333,6 +382,83 @@
     draw(inp.value)
   }
 
+  // ---------- 開催予定 ----------
+  const gradeBadge = (g) => (!g || g === '一般' ? '<span class="badge gray">一般</span>' : `<span class="badge warn">${esc(g)}</span>`)
+  async function schedule() {
+    setNav('schedule')
+    const j = await doc('schedule')
+    if (!j?.meetings?.length) return view('<h1>開催予定</h1><p class="empty">開催予定はまだありません。</p>')
+    const big = j.meetings.filter((m) => ['SG', 'G1', 'G2', 'G3'].includes(m.grade))
+    const row = (m) => `<tr><td class="l">${md(m.start_date)}〜${md(m.end_date)}<span class="meta">${m.days}日間</span></td>
+      <td class="l"><a href="#/venue/${m.jcd}">${esc(m.venue)}</a></td><td class="l">${gradeBadge(m.grade)}</td>
+      <td class="l" style="white-space:normal"><a href="#/meeting/${m.jcd}/${m.start_date}">${esc(m.title)}</a></td><td>${m.racers ? m.racers + '人' : '―'}</td></tr>`
+    view(`<h1>開催予定 <span class="sub">${md(j.from)}〜${md(j.to)}・${j.meetings.length}開催</span></h1>
+      ${big.length ? `<h2>グレードレース</h2><div class="scroll"><table><tbody>${big.map(row).join('')}</tbody></table></div>` : ''}
+      <h2>すべての開催</h2><div class="scroll"><table><thead><tr><th class="l">期間</th><th class="l">場</th><th class="l">グレード</th><th class="l">開催名</th><th>出場予定</th></tr></thead><tbody>${j.meetings.map(row).join('')}</tbody></table></div>
+      <p class="note">公式の月間スケジュールとあっせん（出場予定選手）から。出場予定は変わることがあります。</p>`)
+  }
+  async function meeting(jcd, start) {
+    setNav('schedule')
+    const j = await doc(`meeting/${jcd}/${start}`)
+    const M = j?.meeting
+    if (!M) return view('<p class="empty">この開催のデータはまだありません。</p>')
+    view(`<h1>${esc(M.venue)} ${gradeBadge(M.grade)}</h1><div class="sub">${esc(M.title)}　${md(M.start_date)}〜${md(M.end_date)}（${M.days}日間）</div>
+      <h2>出場予定選手 <span class="sub">${M.racers.length}人・勝率順</span></h2>
+      <div class="scroll"><table><thead><tr><th class="l">選手</th><th>登番</th><th class="l">支部</th><th>勝率</th></tr></thead><tbody>${
+        M.racers.map((r) => `<tr><td class="l"><a class="name" href="#/racer/${r.racer_id}">${esc(r.name)}</a> ${cls(r.class)}</td><td>${r.racer_id}</td><td class="l">${esc(r.branch ?? '')}</td><td>${dash(r.win_rate)}</td></tr>`).join('')}</tbody></table></div>
+      <p class="note">公式のあっせん情報から。欠場・追加あっせんで変わることがあります。</p>`)
+  }
+
+  // ---------- データ分析 ----------
+  async function analysis(kind) {
+    setNav('analysis')
+    const KINDS = [['average', 'コース別平均'], ['ranking', 'コース別ランキング'], ['demoku', '出目分析'], ['yusho', '優勝戦']]
+    kind = KINDS.some(([k]) => k === kind) ? kind : 'average'
+    const j = await doc(`analysis/${kind}`)
+    const tabs = `<div class="tabs" role="tablist">${KINDS.map(([k, n]) => `<button role="tab" aria-selected="${k === kind}" data-k="${k}">${n}</button>`).join('')}</div>`
+    let body = '<p class="empty">データがありません。</p>'
+    if (j && kind === 'average') {
+      const tbl = (cs) => `<div class="scroll"><table><thead><tr><th class="l">コース</th><th>1着率</th><th>2連対率</th><th>3連対率</th><th>平均ST</th><th class="l">決まり手</th></tr></thead><tbody>${
+        cs.map((c) => `<tr><td class="l">${waku(c.course)}</td><td>${bar(c.win_rate, 60)}</td><td>${pct(c.top2_rate)}</td><td>${pct(c.top3_rate)}</td><td>${dash(c.avg_st)}</td>
+          <td class="l">${c.kimarite.slice(0, 3).map((k) => `${esc(k.kimarite)}${pct(k.share)}`).join('・')}</td></tr>`).join('')}</tbody></table></div>`
+      body = `<p class="note">直近1年（${esc(j.period.from)}〜）</p><h2>全国</h2>${tbl(j.national)}
+        <h2>場ごと</h2><div class="grid two">${j.venues.map((v) => `<div><h2 style="margin-top:6px"><a href="#/venue/${v.jcd}">${esc(v.venue)}</a></h2>${tbl(v.courses)}</div>`).join('')}</div>`
+    }
+    if (j && kind === 'ranking') {
+      body = `<p class="note">${esc(j.rule)}</p>${j.by_course.map((c) => `<h2>${waku(c.course)} コースの1着率</h2><div class="scroll"><table><thead><tr><th class="l">順位</th><th class="l">選手</th><th>出走</th><th>1着率</th><th>2連/3連</th><th>平均ST</th></tr></thead><tbody>${
+        c.top.slice(0, 15).map((r, i) => `<tr><td class="l">${i + 1}</td><td class="l"><a class="name" href="#/racer/${r.racer_id}">${esc(r.name)}</a> ${cls(r.class)}<span class="meta">${esc(r.branch ?? '')}</span></td>
+          <td>${r.starts}</td><td>${pct(r.win_rate)}</td><td>${pct(r.top2_rate)}<span class="meta">${pct(r.top3_rate)}</span></td><td>${dash(r.avg_st)}</td></tr>`).join('')}</tbody></table></div>`).join('')}
+        <h2>スタートが速い選手</h2><div class="scroll"><table><thead><tr><th class="l">順位</th><th class="l">選手</th><th>出走</th><th>平均ST</th></tr></thead><tbody>${
+          j.fastest_start.slice(0, 20).map((r, i) => `<tr><td class="l">${i + 1}</td><td class="l"><a class="name" href="#/racer/${r.racer_id}">${esc(r.name)}</a> ${cls(r.class)}</td><td>${r.starts}</td><td>${dash(r.avg_st)}</td></tr>`).join('')}</tbody></table></div>`
+    }
+    if (j && kind === 'demoku') {
+      const blk = (d) => `<div class="stats"><div class="stat"><span>レース</span><b>${d.races.toLocaleString()}</b></div><div class="stat"><span>3連単の平均配当</span><b>${yen(d.avg_payout)}</b></div>
+          <div class="stat"><span>万舟率</span><b>${pct(d.over_10000_rate)}</b></div></div>
+        <div class="grid two" style="margin-top:10px"><div class="scroll"><table><thead><tr><th class="l">順位</th><th class="l">3連単</th><th>回数</th><th>出現率</th></tr></thead><tbody>${
+          d.trifecta_top.slice(0, 10).map((x, i) => `<tr><td class="l">${i + 1}</td><td class="l">${x.combo.split('-').map((l) => waku(l)).join('')}</td><td>${x.count}</td><td>${pct(x.rate)}</td></tr>`).join('')}</tbody></table></div>
+          <div class="panel km">${d.first_by_lane.map((x) => `<span>${waku(x.lane)} 1着</span><i style="width:${Math.max(2, x.rate)}%"></i><span class="num">${pct(x.rate)}</span>`).join('')}</div></div>`
+      body = `<p class="note">直近1年（${esc(j.period.from)}〜）</p><h2>全国</h2>${blk(j.national)}
+        <h2>場ごと</h2><select id="dv" style="font:inherit;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink)">${
+          j.venues.map((v, i) => `<option value="${i}">${esc(v.venue)}</option>`).join('')}</select><div id="dvb" style="margin-top:10px">${blk(j.venues[0])}</div>`
+    }
+    if (j && kind === 'yusho') {
+      const tbl = (rs) => `<div class="scroll"><table><thead><tr><th class="l">日付</th><th class="l">場・開催</th><th class="l">優勝</th><th class="l">着順</th><th class="l">決まり手</th><th>3連単</th></tr></thead><tbody>${
+        rs.map((r) => `<tr><td class="l">${md(r.date)}</td><td class="l">${esc(r.venue)} ${gradeBadge(r.grade)}<span class="meta">${esc(r.series ?? '')}</span></td>
+          <td class="l">${r.winner ? `${waku(r.winner.lane)} <a class="name" href="#/racer/${r.winner.racer_id}">${esc(r.winner.name)}</a>` : '―'}</td>
+          <td class="l">${esc(r.order)}</td><td class="l">${esc(r.kimarite ?? '')}</td><td>${yen(r.trifecta_payout)}</td></tr>`).join('')}</tbody></table></div>`
+      body = `${j.big.length ? `<h2>SG・G1・G2</h2>${tbl(j.big)}` : ''}<h2>すべての優勝戦 <span class="sub">${esc(j.period)}</span></h2>${tbl(j.races)}`
+    }
+    view(`<h1>データ分析</h1>${tabs}${body}`)
+    app.querySelectorAll('[data-k]').forEach((b) => b.addEventListener('click', () => { location.hash = `#/analysis/${b.dataset.k}` }))
+    const dv = document.getElementById('dv')
+    if (dv) dv.addEventListener('change', () => {
+      const d = j.venues[Number(dv.value)]
+      document.getElementById('dvb').innerHTML = `<div class="stats"><div class="stat"><span>レース</span><b>${d.races.toLocaleString()}</b></div><div class="stat"><span>3連単の平均配当</span><b>${yen(d.avg_payout)}</b></div><div class="stat"><span>万舟率</span><b>${pct(d.over_10000_rate)}</b></div></div>
+        <div class="grid two" style="margin-top:10px"><div class="scroll"><table><tbody>${d.trifecta_top.slice(0, 10).map((x, i) => `<tr><td class="l">${i + 1}</td><td class="l">${x.combo.split('-').map((l) => waku(l)).join('')}</td><td>${x.count}</td><td>${pct(x.rate)}</td></tr>`).join('')}</tbody></table></div>
+        <div class="panel km">${d.first_by_lane.map((x) => `<span>${waku(x.lane)} 1着</span><i style="width:${Math.max(2, x.rate)}%"></i><span class="num">${pct(x.rate)}</span>`).join('')}</div></div>`
+    })
+  }
+
   // ---------- 振り分け ----------
   async function route() {
     const p = location.hash.replace(/^#\/?/, '').split('/')
@@ -346,6 +472,9 @@
       if (p[0] === 'venue') return await venue(Number(p[1]))
       if (p[0] === 'racer') return await racer(Number(p[1]))
       if (p[0] === 'racers') return await racers(decodeURIComponent(p[1] ?? ''))
+      if (p[0] === 'schedule') return await schedule()
+      if (p[0] === 'meeting') return await meeting(Number(p[1]), p[2])
+      if (p[0] === 'analysis') return await analysis(p[1])
       return await home()
     } catch (e) { fail(e) }
   }

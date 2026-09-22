@@ -107,7 +107,7 @@ async function removeOld(keepDates) {
   if (LOCAL) return
   const keep = new Set(keepDates.map((d) => d.replace(/-/g, '')))
   for (const k of Object.keys(state)) {
-    const m = k.match(/^race\/(\d{8})-/) ?? k.match(/^(?:races|tenkai)\/(\d{4}-\d{2}-\d{2})$/)
+    const m = k.match(/^race\/(\d{8})-/) ?? k.match(/^(?:races|tenkai|features)\/(\d{4}-\d{2}-\d{2})$/)
     if (!m) continue
     const ymd = m[1].replace(/-/g, '')
     if (keep.has(ymd)) continue
@@ -122,7 +122,8 @@ async function removeOld(keepDates) {
 async function syncDay(date, withRacers) {
   const races = call(`/api/v1/races?date=${date}`)
   if (!races || races.status !== 'ok') return 0
-  const docs = [[`races/${date}`, races], [`tenkai/${date}`, call(`/api/v1/tenkai?date=${date}`)]]
+  const docs = [[`races/${date}`, races], [`tenkai/${date}`, call(`/api/v1/tenkai?date=${date}`)],
+    [`features/${date}`, call(`/api/v1/features?date=${date}`)]]
   for (const r of races.races) {
     const d = publicRace(call(`/api/v1/race?id=${r.race_id}`))
     r.free_pick = d?.race?.free_pick ? d.race.free_pick.lane : null   // 一覧に「無料」の印を出すため
@@ -140,6 +141,12 @@ async function syncDay(date, withRacers) {
 }
 async function syncCommon() {
   const docs = [['results/30', call('/api/v1/results?days=30')]]
+  // 開催予定と、各開催の出場予定選手（あっせん）
+  const sch = call('/api/v1/schedule')
+  docs.push(['schedule', sch])
+  for (const m of sch?.meetings ?? []) docs.push([`meeting/${m.jcd}/${m.start_date}`, call(`/api/v1/meeting?jcd=${m.jcd}&start=${m.start_date}`)])
+  // データ分析（全国・場のコース別平均／コース別ランキング／出目分析／優勝戦）
+  for (const k of ['average', 'ranking', 'demoku', 'yusho']) docs.push([`analysis/${k}`, call(`/api/v1/analysis?kind=${k}`)])
   for (let j = 1; j <= 24; j++) docs.push([`venue/${j}`, call(`/api/v1/venue?jcd=${j}`)])
   // 選手一覧と、直近180日に出走した全選手のページ（日和の「選手一覧」にあたる）。1日1回
   const list = call('/api/v1/racers')

@@ -143,27 +143,38 @@ function metaOf(db, date) {
 function resultsOf(db, date) {
   const res = new Map()
   if (has(db, 'result_live'))
-    for (const r of db.prepare(`SELECT race_id, lane1, lane2, lane3, sanrentan_pay, sanrenpuku_pay, tansho_pay, status
-      FROM result_live WHERE date=?`).all(date)) {
+    for (const r of db.prepare(`SELECT * FROM result_live WHERE date=?`).all(date)) {
+      let pays = null
+      try { pays = r.pays ? JSON.parse(r.pays) : null } catch { /* 壊れていれば出さない */ }
       res.set(r.race_id, r.status === 'cancel' ? { cancelled: true }
-        : { order: [r.lane1, r.lane2, r.lane3].join('-'), trifecta_payout: r.sanrentan_pay, trio_payout: r.sanrenpuku_pay,
-            win_payout: r.tansho_pay, source: '速報' })
+        : { order: [r.lane1, r.lane2, r.lane3].join('-'), order_all: r.order_all ?? null, kimarite: r.kimarite ?? null,
+            trifecta_payout: r.sanrentan_pay, trio_payout: r.sanrenpuku_pay, win_payout: r.tansho_pay,
+            payouts: pays ? Object.fromEntries(Object.entries(pays).map(([k, v]) => [k, { combo: v.combo.split('-').join(v.sep ?? '-'), amount: v.amount }])) : null,
+            source: '速報' })
     }
-  // 競走成績（Kファイル）があればそちらが正
+  // 競走成績（Kファイル）があればそちらが正。6着までの並びと全券種の払戻も付ける
   const k = new Map()
   for (const r of db.prepare(`SELECT e.race_id, e.lane, e.rank_num, r.kimarite FROM entries e JOIN races r ON r.race_id=e.race_id
-    WHERE r.date=? AND e.rank_num BETWEEN 1 AND 3`).all(date)) {
+    WHERE r.date=? AND e.rank_num BETWEEN 1 AND 6`).all(date)) {
     let a = k.get(r.race_id); if (!a) { a = { km: r.kimarite }; k.set(r.race_id, a) }
     a[r.rank_num] = r.lane
   }
+  const BT = { tansho: '単勝', fukusho: '複勝', nirentan: '2連単', nirenpuku: '2連複', kakuren: '拡連複', sanrentan: '3連単', sanrenpuku: '3連複' }
+  const SEP = { nirenpuku: '=', kakuren: '=', sanrenpuku: '=' }
   const pay = new Map()
-  for (const r of db.prepare(`SELECT p.race_id, p.bet_type, p.amount FROM payouts p JOIN races r ON r.race_id=p.race_id
-    WHERE r.date=? AND p.bet_type IN ('tansho','sanrentan','sanrenpuku')`).all(date)) pay.set(r.race_id + '|' + r.bet_type, r.amount)
+  for (const r of db.prepare(`SELECT p.race_id, p.bet_type, p.combo, p.amount FROM payouts p JOIN races r ON r.race_id=p.race_id
+    WHERE r.date=? AND p.amount IS NOT NULL`).all(date)) {
+    if (!pay.has(r.race_id)) pay.set(r.race_id, {})
+    const o = pay.get(r.race_id), name = BT[r.bet_type] ?? r.bet_type
+    const v = { combo: String(r.combo).split('-').join(SEP[r.bet_type] ?? '-'), amount: r.amount }
+    if (o[name]) { o[name] = Array.isArray(o[name]) ? [...o[name], v] : [o[name], v] } else o[name] = v   // 複勝・拡連複は複数
+  }
+  const one = (o, n) => (o?.[n] ? (Array.isArray(o[n]) ? o[n][0].amount : o[n].amount) : null)
   for (const [id, a] of k) {
     if (!a[1] || !a[2] || !a[3]) continue
-    res.set(id, { order: `${a[1]}-${a[2]}-${a[3]}`, kimarite: a.km ?? null,
-      win_payout: pay.get(id + '|tansho') ?? null, trifecta_payout: pay.get(id + '|sanrentan') ?? null,
-      trio_payout: pay.get(id + '|sanrenpuku') ?? null, source: '競走成績' })
+    const o = pay.get(id)
+    res.set(id, { order: `${a[1]}-${a[2]}-${a[3]}`, order_all: [1, 2, 3, 4, 5, 6].map((n) => a[n] ?? '-').join('-'), kimarite: a.km ?? null,
+      win_payout: one(o, '単勝'), trifecta_payout: one(o, '3連単'), trio_payout: one(o, '3連複'), payouts: o ?? null, source: '競走成績' })
   }
   return res
 }
@@ -297,6 +308,8 @@ function buildRace(db, date, id, ctx, full) {
       wind_dir: br.wind_dir, wave: br.wave, before_info: br.status === 'ok' ? '展示まで取得済み' : '展示前',
       fetched_at: jstStamp(br.fetched) } : null,
     tenkai: tenkaiOf(db, pr, ents),
+    demoku: demokuOf(db, jcd, rno),
+    odds: oddsOf(db, id),
     prediction: pr ? {
       access: 'paid',
       note: '有料の買い目の元になる確率。公開サイトに出すときは外すこと',
@@ -317,6 +330,227 @@ function dayContext(db, date) {
 }
 const raceIds = (ctx) => [...new Set([...ctx.meta.keys(), ...ctx.predById.keys(), ...ctx.ents.keys()])]
   .sort((a, b) => a.slice(9, 11) - b.slice(9, 11) || a.slice(12, 14) - b.slice(12, 14))
+
+// ---------- トップの特集（ガチガチ/穴レース・アラート） ----------
+// ★2026-09-23：日和のトップにある「ガチガチレース検索・穴レース検索・まくり/前づけ/チルト跳アラート」にあたるもの。
+//   ガチガチ/穴は AI の1着確率で選ぶ（オッズは使わない）。アラートは当日の直前情報（before.mjs --live）から作る。
+//   ・前づけ：展示の進入で、枠より内のコースに入った艇
+//   ・チルト跳：チルト+1.0度以上、または同じ節の前走からチルトを上げた艇
+//   ・まくり：3〜6号艇の展示タイムが1位で、1号艇より0.05秒以上速い
+//   ・スタート：展示STで、外の艇が内の艇より0.05秒以上速い（内が凹んでいる）
+function featuresOf(db, date, ctx) {
+  const races = raceIds(ctx).map((id) => buildRace(db, date, id, ctx, false))
+  const byId = new Map(races.map((r) => [r.race_id, r]))
+  const open = (r) => !r.closed && !r.cancelled
+  const gachi = [], ana = []
+  for (const [id, pr] of ctx.predById) {
+    const r = byId.get(id); if (!r || !pr.first?.length) continue
+    const f = [...pr.first].sort((a, b) => b.p - a.p)
+    const item = { race_id: id, venue: r.venue, race_no: r.race_no, deadline: r.deadline, closed: r.closed, result: r.result,
+      favorite: { lane: f[0].lane, name: r.favorite?.name ?? f[0].name, win_probability: r1(f[0].p) },
+      second: f[1] ? { lane: f[1].lane, win_probability: r1(f[1].p) } : null }
+    if (f[0].p >= 0.70) gachi.push(item)
+    if (f[0].p < 0.40) ana.push(item)
+  }
+  gachi.sort((a, b) => b.favorite.win_probability - a.favorite.win_probability)
+  ana.sort((a, b) => a.favorite.win_probability - b.favorite.win_probability)
+
+  // アラート（当日の直前情報）
+  const alerts = { maezuke: [], tilt: [], makuri: [], start: [] }
+  const bi = db.prepare(`SELECT b.race_id, b.lane, b.tilt, b.ex_time, b.ex_course, b.ex_st, b.ex_st_flag, p.racer_id
+    FROM before_info b LEFT JOIN programs p ON p.race_id=b.race_id AND p.lane=b.lane
+    WHERE b.race_id BETWEEN ? AND ?`).all(ymd(date) + '-', ymd(date) + '-~')
+  const R = new Map()
+  for (const x of bi) { if (!R.has(x.race_id)) R.set(x.race_id, []); R.get(x.race_id).push(x) }
+  const prevTilt = db.prepare(`SELECT b.tilt FROM before_info b JOIN programs p ON p.race_id=b.race_id AND p.lane=b.lane
+    WHERE p.racer_id=? AND b.race_id < ? AND b.race_id >= ? AND substr(b.race_id,10,2)=? AND b.tilt IS NOT NULL
+    ORDER BY b.race_id DESC LIMIT 1`)
+  const nameOf = (id, lane) => (ctx.ents.get(id) ?? []).find((e) => e.lane === lane)?.name ?? null
+  for (const [id, rows] of R) {
+    const r = byId.get(id); if (!r) continue
+    const base = { race_id: id, venue: r.venue, race_no: r.race_no, deadline: r.deadline, closed: r.closed }
+    for (const x of rows) {
+      if (x.ex_course != null && x.ex_course < x.lane) alerts.maezuke.push({ ...base, lane: x.lane, name: nameOf(id, x.lane), course: x.ex_course })
+      if (x.tilt != null) {
+        const pv = x.racer_id ? prevTilt.get(x.racer_id, id, ymd(addDays(date, -8)) + '-', id.slice(9, 11))?.tilt : null
+        if (x.tilt >= 1.0 || (pv != null && x.tilt > pv))
+          alerts.tilt.push({ ...base, lane: x.lane, name: nameOf(id, x.lane), tilt: x.tilt, previous_tilt: pv ?? null })
+      }
+    }
+    const ex = rows.filter((x) => x.ex_time > 0)
+    if (ex.length === 6) {
+      const best = [...ex].sort((a, b) => a.ex_time - b.ex_time)[0]
+      const one = ex.find((x) => x.lane === 1)
+      if (best.lane >= 3 && one && one.ex_time - best.ex_time >= 0.05)
+        alerts.makuri.push({ ...base, lane: best.lane, name: nameOf(id, best.lane), exhibition_time: best.ex_time, lane1_time: one.ex_time, diff: r2(one.ex_time - best.ex_time) })
+    }
+    const st = rows.filter((x) => x.ex_st != null && x.ex_course != null).sort((a, b) => a.ex_course - b.ex_course)
+    for (let i = 1; i < st.length; i++) {
+      const inner = st[i - 1], outer = st[i]
+      const sIn = inner.ex_st_flag === 'F' ? -inner.ex_st : inner.ex_st, sOut = outer.ex_st_flag === 'F' ? -outer.ex_st : outer.ex_st
+      if (sIn - sOut >= 0.05) alerts.start.push({ ...base, inner_lane: inner.lane, inner_st: sIn, outer_lane: outer.lane, outer_st: sOut, diff: r2(sIn - sOut) })
+    }
+  }
+  for (const k of Object.keys(alerts)) alerts[k].sort((a, b) => (a.closed - b.closed) || String(a.deadline).localeCompare(String(b.deadline)))
+  return {
+    gachigachi: { rule: 'AIの本命の1着確率が70%以上', races: gachi.filter(open).concat(gachi.filter((r) => !open(r))) },
+    ana: { rule: 'AIの本命の1着確率が40%未満（荒れそう）', races: ana.filter(open).concat(ana.filter((r) => !open(r))) },
+    alerts: { ...alerts, rules: {
+      maezuke: '展示の進入で、枠より内のコースに入った艇', tilt: 'チルト+1.0度以上、または同じ節の前走からチルトを上げた艇',
+      makuri: '3〜6号艇の展示タイムが1位で、1号艇より0.05秒以上速い', start: '展示STで外の艇が内の艇より0.05秒以上速い（内が凹み）' } },
+    note: 'アラートは直前情報（締切の約20分前から）が入ったレースだけ。ガチガチ/穴はオッズを使わないAIの確率',
+  }
+}
+
+// ---------- 出目ランク（その場・そのレース番号の直近1年でよく出た3連単） ----------
+function demokuOf(db, jcd, rno) {
+  return cached(`demoku|${jcd}|${rno}|${today()}`, 24 * HOUR, () => {
+    const rows = db.prepare(`SELECT e.race_id, e.lane, e.rank_num FROM entries e JOIN races r ON r.race_id=e.race_id
+      WHERE r.jcd=? AND r.race_no=? AND r.date>=? AND e.rank_num BETWEEN 1 AND 3`).all(jcd, rno, addDays(today(), -365))
+    const by = new Map()
+    for (const x of rows) { if (!by.has(x.race_id)) by.set(x.race_id, {}); by.get(x.race_id)[x.rank_num] = x.lane }
+    const cnt = new Map(), first = new Map()
+    let n = 0
+    for (const a of by.values()) {
+      if (!a[1] || !a[2] || !a[3]) continue
+      n++
+      const k = `${a[1]}-${a[2]}-${a[3]}`
+      cnt.set(k, (cnt.get(k) ?? 0) + 1)
+      first.set(a[1], (first.get(a[1]) ?? 0) + 1)
+    }
+    return { races: n, period: '直近1年',
+      trifecta_top: [...cnt].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([combo, c]) => ({ combo, count: c, rate: pct(c, n) })),
+      first_by_lane: [1, 2, 3, 4, 5, 6].map((l) => ({ lane: l, rate: pct(first.get(l) ?? 0, n) })) }
+  })
+}
+
+// ---------- 開催予定・出場予定（scripts/schedule.mjs が集める） ----------
+function scheduleOf(db, from, to) {
+  if (!has(db, 'schedule')) return []
+  const n = has(db, 'assen') ? new Map(db.prepare(`SELECT jcd||'|'||start_date k, COUNT(*) c FROM assen GROUP BY jcd, start_date`).all().map((r) => [r.k, r.c])) : new Map()
+  return db.prepare(`SELECT * FROM schedule WHERE end_date>=? AND start_date<=? ORDER BY start_date, jcd`).all(from, to)
+    .map((x) => ({ jcd: x.jcd, venue: VENUE[x.jcd], start_date: x.start_date, end_date: x.end_date, days: x.days, title: x.title, grade: x.grade,
+      racers: n.get(x.jcd + '|' + x.start_date) ?? 0 }))
+}
+function meetingOf(db, jcd, start) {
+  const m = has(db, 'schedule') ? db.prepare(`SELECT * FROM schedule WHERE jcd=? AND start_date=?`).get(jcd, start) : null
+  if (!m) return null
+  const rs = has(db, 'assen') ? db.prepare(`SELECT a.racer_id, a.name, a.class, r.win_rate, r.branch FROM assen a
+    LEFT JOIN (SELECT racer_id, win_rate, branch, MAX(period) FROM racer_period GROUP BY racer_id) r ON r.racer_id=a.racer_id
+    WHERE a.jcd=? AND a.start_date=? ORDER BY r.win_rate DESC`).all(jcd, start) : []
+  return { jcd, venue: VENUE[jcd], start_date: m.start_date, end_date: m.end_date, days: m.days, title: m.title, grade: m.grade,
+    racers: rs.map((r) => ({ racer_id: r.racer_id, name: r.name, class: r.class, branch: r.branch, win_rate: r.win_rate })) }
+}
+function upcomingOf(db, id) {
+  if (!has(db, 'assen')) return []
+  return db.prepare(`SELECT s.jcd, s.start_date, s.end_date, s.title, s.grade FROM assen a JOIN schedule s USING (jcd, start_date)
+    WHERE a.racer_id=? AND s.end_date>=? ORDER BY s.start_date`).all(id, today())
+    .map((x) => ({ jcd: x.jcd, venue: VENUE[x.jcd], start_date: x.start_date, end_date: x.end_date, title: x.title, grade: x.grade }))
+}
+
+// ---------- データ分析（日和の「データ分析」「出目分析」にあたる。2026-09-23） ----------
+//   kind=average  全国と場ごとのコース別1着率・平均ST・決まり手（直近1年）
+//   kind=ranking  コース別の1着率ランキング（直近1年・そのコースで20走以上）
+//   kind=demoku   出目分析：全国と場ごとの3連単の出目上位・1着の枠・万舟率
+//   kind=yusho    優勝戦の結果（直近90日）。SG/G1は別に並べる
+function analysisOf(db, kind) {
+  return cached('analysis|' + kind + '|' + today(), 12 * HOUR, () => {
+    const from = addDays(today(), -365), lo = ymd(from)
+    if (kind === 'average') {
+      const rows = db.prepare(`SELECT r.jcd, e.course, COUNT(*) n, SUM(e.rank_num=1) w, SUM(e.rank_num<=2) t2, SUM(e.rank_num<=3) t3,
+        AVG(CASE WHEN e.st>0 AND e.st<1 THEN e.st END) st FROM entries e JOIN races r ON r.race_id=e.race_id
+        WHERE r.date>=? AND e.course+0 BETWEEN 1 AND 6 GROUP BY r.jcd, e.course`).all(from)
+      const km = db.prepare(`SELECT r.jcd, e.course, r.kimarite k, COUNT(*) n FROM entries e JOIN races r ON r.race_id=e.race_id
+        WHERE r.date>=? AND e.rank_num=1 AND r.kimarite IS NOT NULL GROUP BY r.jcd, e.course, r.kimarite`).all(from)
+      const sum = (arr) => arr.reduce((a, x) => ({ n: a.n + x.n, w: a.w + x.w, t2: a.t2 + x.t2, t3: a.t3 + x.t3, st: a.st + (x.st ?? 0) * x.n }), { n: 0, w: 0, t2: 0, t3: 0, st: 0 })
+      const row = (c, s, kms) => { const tw = kms.reduce((a, x) => a + x.n, 0)
+        return { course: c, starts: s.n, win_rate: pct(s.w, s.n), top2_rate: pct(s.t2, s.n), top3_rate: pct(s.t3, s.n), avg_st: s.n ? r2(s.st / s.n) : null,
+          kimarite: Object.entries(kms.reduce((m, x) => ({ ...m, [x.k]: (m[x.k] ?? 0) + x.n }), {})).sort((a, b) => b[1] - a[1]).map(([k, n]) => ({ kimarite: k, share: pct(n, tw) })) } }
+      const national = [1, 2, 3, 4, 5, 6].map((c) => row(c, sum(rows.filter((x) => x.course === c)), km.filter((x) => x.course === c)))
+      const venues = [...new Set(rows.map((x) => x.jcd))].sort((a, b) => a - b).map((j) => ({ jcd: j, venue: VENUE[j],
+        courses: [1, 2, 3, 4, 5, 6].map((c) => row(c, sum(rows.filter((x) => x.jcd === j && x.course === c)), km.filter((x) => x.jcd === j && x.course === c))) }))
+      return { period: { from, to: today() }, national, venues }
+    }
+    if (kind === 'ranking') {
+      const rows = db.prepare(`SELECT e.racer_id, e.course, COUNT(*) n, SUM(e.rank_num=1) w, SUM(e.rank_num<=2) t2, SUM(e.rank_num<=3) t3,
+        AVG(CASE WHEN e.st>0 AND e.st<1 THEN e.st END) st FROM entries e
+        WHERE e.race_id>=? AND e.course+0 BETWEEN 1 AND 6 AND e.racer_id IS NOT NULL GROUP BY e.racer_id, e.course HAVING n>=20`).all(lo)
+      const name = new Map(db.prepare(`SELECT r.racer_id, r.name, r.grade, r.branch FROM racer_period r
+        JOIN (SELECT racer_id, MAX(period) mp FROM racer_period GROUP BY racer_id) m ON m.racer_id=r.racer_id AND m.mp=r.period`).all().map((r) => [r.racer_id, r]))
+      const by = [1, 2, 3, 4, 5, 6].map((c) => ({ course: c,
+        top: rows.filter((x) => x.course === c).sort((a, b) => b.w / b.n - a.w / a.n).slice(0, 30).map((x) => ({
+          racer_id: x.racer_id, name: name.get(x.racer_id)?.name ?? null, class: name.get(x.racer_id)?.grade ?? null, branch: name.get(x.racer_id)?.branch ?? null,
+          starts: x.n, win_rate: pct(x.w, x.n), top2_rate: pct(x.t2, x.n), top3_rate: pct(x.t3, x.n), avg_st: r2(x.st) })) }))
+      const st = db.prepare(`SELECT racer_id, COUNT(*) n, AVG(st) st FROM entries WHERE race_id>=? AND st>0 AND st<1 AND racer_id IS NOT NULL
+        GROUP BY racer_id HAVING n>=50 ORDER BY st LIMIT 30`).all(lo)
+      return { period: { from, to: today() }, rule: '直近1年・そのコースで20走以上', by_course: by,
+        fastest_start: st.map((x) => ({ racer_id: x.racer_id, name: name.get(x.racer_id)?.name ?? null, class: name.get(x.racer_id)?.grade ?? null, starts: x.n, avg_st: r2(x.st) })) }
+    }
+    if (kind === 'demoku') {
+      const rows = db.prepare(`SELECT r.jcd, e.race_id, e.lane, e.rank_num FROM entries e JOIN races r ON r.race_id=e.race_id
+        WHERE r.date>=? AND e.rank_num BETWEEN 1 AND 3`).all(from)
+      const pay = new Map(db.prepare(`SELECT p.race_id, p.amount FROM payouts p WHERE p.race_id>=? AND p.bet_type='sanrentan'`).all(lo).map((r) => [r.race_id, r.amount]))
+      const by = new Map()
+      for (const x of rows) { if (!by.has(x.race_id)) by.set(x.race_id, { jcd: x.jcd }); by.get(x.race_id)[x.rank_num] = x.lane }
+      const make = (list) => {
+        const cnt = new Map(), first = new Map(); let n = 0, man = 0, sum = 0, np = 0
+        for (const [id, a] of list) {
+          if (!a[1] || !a[2] || !a[3]) continue
+          n++; const k = `${a[1]}-${a[2]}-${a[3]}`; cnt.set(k, (cnt.get(k) ?? 0) + 1); first.set(a[1], (first.get(a[1]) ?? 0) + 1)
+          const p = pay.get(id); if (p) { np++; sum += p; if (p >= 10000) man++ }
+        }
+        return { races: n, trifecta_top: [...cnt].sort((a, b) => b[1] - a[1]).slice(0, 20).map(([combo, c]) => ({ combo, count: c, rate: pct(c, n) })),
+          first_by_lane: [1, 2, 3, 4, 5, 6].map((l) => ({ lane: l, rate: pct(first.get(l) ?? 0, n) })),
+          avg_payout: np ? Math.round(sum / np) : null, over_10000_rate: pct(man, np) }
+      }
+      const all = [...by]
+      return { period: { from, to: today() }, national: make(all),
+        venues: [...new Set(all.map(([, a]) => a.jcd))].sort((a, b) => a - b).map((j) => ({ jcd: j, venue: VENUE[j], ...make(all.filter(([, a]) => a.jcd === j)) })) }
+    }
+    if (kind === 'yusho') {
+      const races = db.prepare(`SELECT race_id, date, jcd, title, series, grade, kimarite FROM races WHERE date>=? AND title LIKE '%優勝戦%' AND title NOT LIKE '%準優%'
+        ORDER BY date DESC`).all(addDays(today(), -90))
+      const q = db.prepare(`SELECT lane, course, racer_id, racer_name, rank_num, st FROM entries WHERE race_id=? ORDER BY rank_num`)
+      const pay = db.prepare(`SELECT amount FROM payouts WHERE race_id=? AND bet_type='sanrentan'`)
+      const out = races.map((r) => {
+        const es = q.all(r.race_id), w = es.find((e) => e.rank_num === 1)
+        const nm = w ? db.prepare(`SELECT name FROM racer_period WHERE racer_id=? ORDER BY period DESC LIMIT 1`).get(w.racer_id)?.name : null
+        return { race_id: r.race_id, date: r.date, venue: VENUE[r.jcd], jcd: r.jcd, series: r.series, grade: r.grade ?? '一般', kimarite: r.kimarite,
+          winner: w ? { racer_id: w.racer_id, name: nm ?? w.racer_name, lane: w.lane, course: w.course, st: w.st } : null,
+          order: es.filter((e) => e.rank_num >= 1).slice(0, 3).map((e) => e.lane).join('-'), trifecta_payout: pay.get(r.race_id)?.amount ?? null }
+      })
+      return { period: '直近90日', races: out, big: out.filter((x) => ['SG', 'G1', 'G2'].includes(x.grade)) }
+    }
+    return null
+  })
+}
+
+// ---------- オッズ（2026-09-23） ----------
+//   締切前：before.mjs --live が締切20分前と5分前に取った 3連単・3連複・2連単・2連複（odds_snap）と、
+//           odds-live.mjs が取っている単勝・複勝（odds_live の最新）
+//   締切後：翌日に集める確定オッズ（odds3t / odds3f / odds_tan）があればそちら
+function oddsOf(db, id) {
+  const pick = (sql, ...a) => { try { return db.prepare(sql).all(...a) } catch { return [] } }
+  const obj = (rows) => (rows.length ? Object.fromEntries(rows.map((r) => [r.combo, r.odds])) : null)
+  const fin3t = obj(pick(`SELECT combo, odds FROM odds3t WHERE race_id=?`, id))
+  if (fin3t) {
+    const tan = pick(`SELECT lane, tansho, fukusho_lo, fukusho_hi FROM odds_tan WHERE race_id=? ORDER BY lane`, id)
+    return { kind: '確定', taken_at: null, minutes_before: null,
+      win: tan.map((t) => ({ lane: t.lane, odds: t.tansho })), place: tan.map((t) => ({ lane: t.lane, low: t.fukusho_lo, high: t.fukusho_hi })),
+      trifecta: fin3t, trio: obj(pick(`SELECT combo, odds FROM odds3f WHERE race_id=?`, id)) }
+  }
+  const meta = pick(`SELECT taken, mins_before FROM odds_snap_meta WHERE race_id=?`, id)[0]
+  const snap = pick(`SELECT kind, combo, odds FROM odds_snap WHERE race_id=?`, id)
+  const live = pick(`SELECT l.lane, l.tansho, l.fukusho_lo, l.taken, l.mins_before FROM odds_live l
+    JOIN (SELECT lane, MAX(taken) mt FROM odds_live WHERE race_id=? GROUP BY lane) m ON m.lane=l.lane AND m.mt=l.taken WHERE l.race_id=? ORDER BY l.lane`, id, id)
+  if (!meta && !live.length) return null
+  const k = (kind) => obj(snap.filter((r) => r.kind === kind))
+  return { kind: '締切前', taken_at: meta ? jstStamp(meta.taken) : null, minutes_before: meta?.mins_before ?? null,
+    win: live.map((t) => ({ lane: t.lane, odds: t.tansho })), place: live.map((t) => ({ lane: t.lane, low: t.fukusho_lo, high: null })),
+    win_taken: live[0] ? `${live[0].taken}（締切${live[0].mins_before}分前）` : null,
+    trifecta: k('sanrentan'), trio: k('sanrenpuku'), exacta: k('nirentan'), quinella: k('nirenpuku'),
+    note: '締切前のオッズは締切までに変わります。確定オッズとは違います' }
+}
 
 // ---------- 実績 ----------
 function resultsSummary(db, days) {
@@ -473,6 +707,7 @@ function racerOf(db, id) {
       maezuke: { starts: withCourse.length, inward, inward_rate: pct(inward, withCourse.length), outward, outward_rate: pct(outward, withCourse.length) },
       winning_moves: [...moves].sort((a, b) => b[1] - a[1]).map(([k, n]) => ({ kimarite: k, count: n, share: pct(n, wins) })),
       series_recent,
+      upcoming: upcomingOf(db, id),
       today: todayRaces.map((x) => ({ race_id: x.race_id, venue: VENUE[Number(x.race_id.slice(9, 11))], race_no: Number(x.race_id.slice(12, 14)), lane: x.lane })),
       recent: rows.slice(0, 20).map((x) => ({ date: x.date, venue: VENUE[x.jcd], race_no: x.race_no, lane: x.lane, course: x.course,
         st: x.st, st_flag: x.st_flag, rank: x.rank_num ?? x.rank, kimarite: x.rank_num === 1 ? x.kimarite : null })),
@@ -580,6 +815,10 @@ const INDEX = {
     { path: '/api/v1/tenkai?date=YYYY-MM-DD', access: 'free', what: '全レースの展開予想（本線・対抗・決まり手の確率・一言）' },
     { path: '/api/v1/picks?date=YYYY-MM-DD', access: 'paid', what: 'その日に記録した買い目（2点プラン・4点・無料枠・B2）と的中' },
     { path: '/api/v1/results?days=30', access: 'free', what: '実績（日別・合計の的中率と回収率。外れた日も含む）' },
+    { path: '/api/v1/features?date=YYYY-MM-DD', access: 'free', what: 'トップの特集：ガチガチ/穴レース（AIの確率）・前づけ/チルト跳/まくり/スタートのアラート（当日の直前情報）' },
+    { path: '/api/v1/analysis?kind=average|ranking|demoku|yusho', access: 'free', what: 'データ分析：全国/場のコース別平均・コース別ランキングとST・出目分析・優勝戦の結果' },
+    { path: '/api/v1/schedule?from=YYYY-MM-DD&to=YYYY-MM-DD', access: 'free', what: '開催予定（場・期間・グレード・開催名・出場予定の人数）' },
+    { path: '/api/v1/meeting?jcd=1..24&start=YYYY-MM-DD', access: 'free', what: '1つの開催の出場予定選手（あっせん）' },
     { path: '/api/v1/racers', access: 'free', what: '選手一覧（直近180日に出走した全選手）' },
     { path: '/api/v1/racer?id=NNNN', access: 'free', what: '選手（期別成績・直近1年の成績・コース別/場別/グレード別/時間帯別・1コースの逃げ率と負け方・前づけ・優勝/優出・事故・過去の節・本日の出走・直近20走）' },
     { path: '/api/v1/venue?jcd=1..24', access: 'free', what: '場（コース別1着率・決まり手・1コースの月別/レース番号別の強さ・平均配当）' },
@@ -640,6 +879,21 @@ export function apiRoute(u, res) {
       const days = Math.min(365, Math.max(1, Number(u.searchParams.get('days') || 30)))
       return send(200, { ...stamp, ...resultsSummary(db, days) })
     }
+    if (p === '/api/v1/analysis') {
+      const kind = u.searchParams.get('kind') ?? ''
+      const a = ['average', 'ranking', 'demoku', 'yusho'].includes(kind) ? analysisOf(db, kind) : null
+      return a ? send(200, { ...stamp, kind, ...a }) : send(400, { error: 'kind は average / ranking / demoku / yusho' })
+    }
+    if (p === '/api/v1/schedule') {
+      const from = isDate(u.searchParams.get('from')) ? u.searchParams.get('from') : today()
+      const to = isDate(u.searchParams.get('to')) ? u.searchParams.get('to') : addDays(from, 40)
+      return send(200, { ...stamp, from, to, meetings: scheduleOf(db, from, to) })
+    }
+    if (p === '/api/v1/meeting') {
+      const m = meetingOf(db, Number(u.searchParams.get('jcd')), u.searchParams.get('start') ?? '')
+      return m ? send(200, { ...stamp, meeting: m }) : send(404, { error: 'その開催は見つかりません（jcd と start=初日 YYYY-MM-DD）' })
+    }
+    if (p === '/api/v1/features') return send(200, { ...stamp, date, ...featuresOf(db, date, dayContext(db, date)) })
     if (p === '/api/v1/racers') return send(200, { ...stamp, note: '直近180日に出走した選手。勝率は最新の期別成績', racers: racerList(db) })
     if (p === '/api/v1/racer') {
       const id = Number(u.searchParams.get('id'))

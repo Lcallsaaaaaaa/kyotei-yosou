@@ -66,6 +66,13 @@ Webサイト（デザインはGPTで作る）・note記事の自動生成・将�
   `win_rate_national`／`top2_rate_national`（全国勝率・2連対率）・`win_rate_local`／`top2_rate_local`（当地）・
   `motor_no`／`motor_top2_rate`・`boat_no`／`boat_top2_rate`・`avg_st`（直近60走の平均ST）・`f_count`（過去180日のF回数）・
   `win_probability`（1着確率）・`top2_probability`（2着以内の確率）
+- **`entries[].before`**（直前情報・展示のあと）：`weight`（体重）・`adjust_weight`（調整重量）・`exhibition_time`（展示タイム）・`exhibition_rank`（展示タイムの順位）・`tilt`（チルト）・`parts_changed`（部品交換）・`start_course`（スタート展示の進入コース）・`start_st`（展示ST）・`start_flag`（`F`＝展示でのフライング、`L`＝出遅れ）。展示前は `null`
+- **`entries[].stats_1y`**（基本情報・直近1年）：`starts`・`win_rate`・`top2_rate`・`top3_rate`・`avg_st`・`avg_st_rank`（同じレース内のST順位の平均）・`accidents`（`flying`/`late`/`disqualified`）・`accident_rate`・`yusho`/`yushutsu`/`junyu`（優勝・優出・準優出）・`titles_since_2022`・`maezuke_rate`
+- **`entries[].course_stats`**（枠別情報）：今回入るコース（展示の進入、無ければ枠）での直近1年の成績。`wins_by_kimarite`、1コースなら `escape_rate`（逃げ率）と `lost_to`（差され・まくられ・まくり差され・抜かれ/恵まれの率）
+- **`entries[].motor`**（モータ情報）：`period_from`（今期の始まり＝モーター入れ替え）・`total`（今期の1着/2連/3連率）・`last_30d`・`avg_exhibition_recent`・`users`（過去の使用者と着順）
+- **`entries[].konsetsu`**（今節成績）：`series_result`（番組表の今節着順）・`races`（前日までの内訳）・`top2_rate`・`avg_st`
+- **`conditions`**（水面気象）：`weather`・`air_temp`・`water_temp`・`wind_speed`（m）・`wind_dir`（公式の風向図の番号 1〜16、17は無風）・`wave`（cm）・`before_info`（`展示まで取得済み`／`展示前`）・`fetched_at`
+  当日は締切の20分前から公式の直前情報を取りに行き、展示が揃うまで数分おきに取り直します
 - **`tenkai`**（展開予想）：下の3.と同じ中身
 - **`prediction`**（有料）：`confidence`（自信度）・`trio`（3連複・上位8点）・`trifecta`（3連単・上位24点）・`exacta`（2連単・上位8点）。すべて確率つき
 - **`picks`**（有料）：そのレースで記録した買い目。5.と同じ中身
@@ -116,11 +123,16 @@ Webサイト（デザインはGPTで作る）・note記事の自動生成・将�
 `hit` は結果前 `null`、当たり `true`、外れ `false`。`payout` は当たったときの払戻（100円あたり）。
 
 ## 6. 選手　`/api/v1/racer?id=登録番号`　（無料）
-選手ページに使う。例 `/api/v1/racer?id=4320`
+選手ページに使う。例 `/api/v1/racer?id=4320`。選手一覧は `/api/v1/racers`（直近180日に出走した全選手・勝率順）
 
-- プロフィール：`name`・`kana`・`branch`・`class`・`birth`・`sex`・`age`・`height`・`weight`・`period`（期）
-- `official`：公式の期別成績（`win_rate`・`top2_rate`・`firsts`・`seconds`・`starts`）
-- `by_course`：コース別（直近1年）の `starts`・`win_rate`・`top2_rate`・`top3_rate`・`avg_st`
+- プロフィール：`name`・`kana`・`branch`・`class`・`birth`・`sex`・`age`・`height`・`weight`・`blood`・`period`（期）
+- `official`：公式の期別成績／`periods`：直近12期の推移（級別・勝率・2連対率・出走・1着・2着）
+- `summary_1y`：直近1年の総合（3連対率・ST順位・事故・優勝/優出/準優）／`titles_since_2022`
+- `by_course`：コース別（成績・ST順位・勝ち方・直近5走。1コースは逃げ率と負け方）
+- `by_venue`（場別）・`by_grade`（グレード別）・`by_time`（朝/昼/夜）・`by_wave`（波5cm以上/未満）
+- `maezuke`：前づけ（枠より内へ）と外へ出た回数・率
+- `series_recent`：最近6節（期間・場・開催・着順の並び・優勝/優出/準優出）
+- `today`：本日の出走
 - `winning_moves`：勝った決まり手の内訳（直近1年）
 - `recent`：直近20走（日付・場・R・枠・コース・ST・着順・決まり手）
 
@@ -141,7 +153,30 @@ Webサイト（デザインはGPTで作る）・note記事の自動生成・将�
 2. `closed` が `true` のレースは記事にしない（締切済み）
 3. 買い目・確率・的中率の数字は**JSONのまま使い、作ったり丸めたりしない**
 
+## 9. トップの特集　`/api/v1/features?date=YYYY-MM-DD`　（無料）
+- `gachigachi`：AIの本命の1着確率が70%以上のレース／`ana`：40%未満（荒れそう）のレース。どちらもオッズは使っていない
+- `alerts`：当日の直前情報から作るアラート。`maezuke`（枠より内のコースに入った）・`tilt`（チルト+1.0以上、または前走から上げた）・
+  `makuri`（3〜6号艇の展示タイムが1位で1号艇より0.05秒以上速い）・`start`（展示STで外が内より0.05秒以上速い）。`rules` に条件の説明
+
+## 10. 開催予定・出場予定　（無料）
+- `/api/v1/schedule?from=&to=`：開催（場・期間・グレード・開催名・出場予定の人数）。公式の月間スケジュールから、毎日15時に更新
+- `/api/v1/meeting?jcd=&start=初日`：その開催の出場予定選手（公式のあっせん情報）
+- 選手の `upcoming`：その選手の出場予定
+
+## 11. データ分析　`/api/v1/analysis?kind=`　（無料）
+- `average`：全国と場ごとのコース別1着率・2連/3連対率・平均ST・決まり手
+- `ranking`：コース別の1着率ランキング（そのコースで20走以上）とスタートが速い選手
+- `demoku`：出目分析（全国と場ごとの3連単の出目上位20・1着の枠・平均配当・万舟率）
+- `yusho`：優勝戦の結果（直近90日。`big` はSG/G1/G2だけ）
+
+## 12. レース詳細に追加した項目
+- `odds`：オッズ。`kind` が `締切前`（締切20分前と5分前に取得。3連単・3連複・2連単・2連複と、単勝・複勝）か `確定`
+- `demoku`：その場・そのレース番号の直近1年の出目ランク（3連単の上位10・1着の枠）
+- `result.order_all`（6着までの並び）・`result.kimarite`・`result.payouts`（全券種の組番と払戻。複勝・拡連複は複数）
+
 ---
 
 ### 変更の履歴
 - 2026-09-21　v1.0 作成（races／race／tenkai／results／picks／racer／venue）
+- 2026-09-22　race に `entries[].before`（直前情報）と `conditions`（水面気象）を追加
+- 2026-09-23　選手・出走表を厚く（基本情報・枠別・モータ・今節）／選手一覧／全レースの当日結果（決まり手・全券種）／締切前オッズ／出目ランク／トップの特集とアラート／開催予定・出場予定／データ分析

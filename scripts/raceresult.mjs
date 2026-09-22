@@ -42,6 +42,9 @@ db.exec(`
 
 // ---------- 解析 ----------
 // 着順表は各行が「着（全角数字）」＋「is-boatColorN」。ページ内で is-boatColor はここにしか出ない。
+// ★2026-09-23に足した列：決まり手・6着までの並び・全券種の払戻（JSON）。公開サイトの「結果」に使う
+for (const c of ['kimarite TEXT', 'order_all TEXT', 'pays TEXT'])
+  try { db.exec('ALTER TABLE result_live ADD COLUMN ' + c) } catch { /* すでにある */ }
 const ZEN = '１２３４５６'
 export function parseResult(html) {
   const order = []
@@ -70,7 +73,9 @@ export function parseResult(html) {
     // 画面で "=" にしたいときは出す側で置き換える。
     pay[kind] = { combo: nums.join('-'), sep, amount: Number(a[1].replace(/,/g, '')) }
   }
-  return { order, pay }
+  // 決まり手：<th>決まり手</th> の表の次の <td class="is-fs16">逃げ</td>
+  const km = html.match(/<th>決まり手<\/th>[\s\S]{0,300}?<td class="is-fs16">([^<]+)</)
+  return { order, pay, kimarite: km ? km[1].trim() : null }
 }
 
 if (argv.includes('--selftest')) {   // 解析だけ確かめる
@@ -99,15 +104,20 @@ const now = DATE === TODAY ? new Date().toTimeString().slice(0, 5) : '23:59'
 const ONE = flag('race')
 const SRC = ['haishin_daily', 'tansho_daily', 'spot_daily']
   .filter((t) => db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name=?`).get(t))
+// ★2026-09-23：公開サイト（日和と同じ構成）で「全レースの当日結果」を出すため、番組表の全レースも対象にした。
+//   それまでは予想を記録したレースだけで、残りは翌日の競走成績まで空だった。
+//   15分おきに「締切を過ぎて、まだ結果の無いレース」だけを取るので、1回あたり十数ページ程度。
+const HAS_META = !!db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='race_meta'`).get()
 const union = SRC.map((t) => `SELECT DISTINCT race_id, date, race_no, deadline FROM ${t} WHERE date=?`)
   .concat([`SELECT DISTINCT race_id, date, race_no, deadline FROM bets WHERE date=? AND decision='buy'`])
+  .concat(HAS_META ? [`SELECT race_id, date, race_no, deadline FROM race_meta WHERE date=?`] : [])
   .join(' UNION ')
-const params = [...SRC.map(() => DATE), DATE]
+const params = [...SRC.map(() => DATE), DATE, ...(HAS_META ? [DATE] : [])]
 const targets = ONE
   ? db.prepare(`SELECT DISTINCT race_id, date, race_no FROM ${SRC[0] ?? 'haishin_daily'} WHERE race_id=?`).all(ONE)
   : db.prepare(`
       SELECT race_id, date, race_no, deadline FROM (${union})
-      WHERE race_id NOT IN (SELECT race_id FROM result_live WHERE status IN ('ok','cancel'))
+      WHERE race_id NOT IN (SELECT race_id FROM result_live WHERE status='cancel' OR (status='ok' AND kimarite IS NOT NULL))
         AND (deadline IS NULL OR deadline <= ?)
       ORDER BY deadline`).all(...params, now)
 if (!targets.length) { console.log(`${DATE} ${now} 取るものなし`); db.close(); process.exit(0) }
@@ -145,7 +155,9 @@ async function get(t) {
     } catch { if (a === 3) return undefined; await sleep(DELAY * a * 3) }
   }
 }
-const ins = db.prepare(`INSERT OR REPLACE INTO result_live VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+const ins0 = db.prepare(`INSERT OR REPLACE INTO result_live (race_id,date,jcd,race_no,lane1,lane2,lane3,sanrentan,sanrentan_pay,
+  sanrenpuku,sanrenpuku_pay,tansho,tansho_pay,status,fetched_at,kimarite,order_all,pays) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+const ins = { run: (...a) => ins0.run(...a, ...(a.length === 15 ? [null, null, null] : [])) }
 const stamp = new Date().toISOString()
 let ok = 0, waiting = 0, partial = 0, err = 0, off = 0
 for (let i = 0; i < targets.length; i += CONC) {
@@ -169,7 +181,8 @@ for (let i = 0; i < targets.length; i += CONC) {
     ins.run(t.race_id, DATE, Number(jcd), Number(rno), a ?? null, b ?? null, c ?? null,
       r.pay['3連単']?.combo ?? null, r.pay['3連単']?.amount ?? null,
       r.pay['3連複']?.combo ?? null, r.pay['3連複']?.amount ?? null,
-      r.pay['単勝']?.combo ?? null, r.pay['単勝']?.amount ?? null, st, stamp)
+      r.pay['単勝']?.combo ?? null, r.pay['単勝']?.amount ?? null, st, stamp,
+      r.kimarite ?? null, r.order.map((x) => x ?? '-').join('-'), JSON.stringify(r.pay))
   }
   db.exec('COMMIT')
   if (i + CONC < targets.length) await sleep(DELAY)

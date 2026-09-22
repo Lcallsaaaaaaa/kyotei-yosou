@@ -214,6 +214,44 @@ if (LIVE) {
   const mins = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5))
   const last = new Map()   // race_id → 最後に取った時刻(ms)
   const done = new Set()
+  // ★締切前オッズ（2026-09-23・公開サイトの「オッズ」タブ用）：締切20分前と5分前の2回、
+  //   3連単(120)・3連複(20)・2連単(30)・2連複(15) を取る。単勝・複勝は odds-live.mjs が取っている。
+  //   並びは払戻との突き合わせで確定済み：3連単=列が1着・行が2着×3着（行ごと）／3連複=行が2つ目と3つ目・列が1つ目（行ごと）
+  //   ／2連単=列が1着・行が2着（行ごと）／2連複=行が2つ目・列が1つ目（行ごと）。2026-09-22に12レースで2連単・2連複とも一致
+  db.exec(`CREATE TABLE IF NOT EXISTS odds_snap (race_id TEXT NOT NULL, kind TEXT NOT NULL, combo TEXT NOT NULL, odds REAL,
+      PRIMARY KEY (race_id, kind, combo));
+    CREATE TABLE IF NOT EXISTS odds_snap_meta (race_id TEXT PRIMARY KEY, taken TEXT, mins_before INTEGER)`)
+  const O3T = (() => { const cols = []; for (let a = 1; a <= 6; a++) { const rest = [1, 2, 3, 4, 5, 6].filter((x) => x !== a), col = []
+    for (const b of rest) for (const c of rest) if (c !== b) col.push(`${a}-${b}-${c}`); cols.push(col) }
+    const o = []; for (let r = 0; r < 20; r++) for (let c = 0; c < 6; c++) o.push(cols[c][r]); return o })()
+  const O3F = (() => { const o = []; for (let b = 2; b <= 6; b++) for (let c = b + 1; c <= 6; c++) for (let a = 1; a < b; a++) o.push(`${a}-${b}-${c}`); return o })()
+  const O2T = (() => { const cols = []; for (let a = 1; a <= 6; a++) cols.push([1, 2, 3, 4, 5, 6].filter((x) => x !== a).map((b) => `${a}-${b}`))
+    const o = []; for (let r = 0; r < 5; r++) for (let c = 0; c < 6; c++) o.push(cols[c][r]); return o })()
+  const O2F = (() => { const o = []; for (let b = 2; b <= 6; b++) for (let a = 1; a < b; a++) o.push(`${a}-${b}`); return o })()
+  const pts = (h) => [...h.matchAll(/<td class="oddsPoint[^"]*">([^<]*)<\/td>/g)].map((m) => { const v = Number(m[1].trim()); return Number.isFinite(v) && v > 0 ? v : null })
+  const insO = db.prepare(`INSERT OR REPLACE INTO odds_snap (race_id,kind,combo,odds) VALUES (?,?,?,?)`)
+  const insOM = db.prepare(`INSERT OR REPLACE INTO odds_snap_meta (race_id,taken,mins_before) VALUES (?,?,?)`)
+  const snaps = new Map()
+  async function snapOdds(r, left) {
+    const q = `rno=${r.race_no}&jcd=${String(r.jcd).padStart(2, '0')}&hd=${DAY.replace(/-/g, '')}`
+    const got3t = pts(await (await fetch(`https://www.boatrace.jp/owpc/pc/race/odds3t?${q}`, { signal: AbortSignal.timeout(25_000) })).text())
+    await sleep(1000)
+    const got3f = pts(await (await fetch(`https://www.boatrace.jp/owpc/pc/race/odds3f?${q}`, { signal: AbortSignal.timeout(25_000) })).text())
+    await sleep(1000)
+    const got2 = pts(await (await fetch(`https://www.boatrace.jp/owpc/pc/race/odds2tf?${q}`, { signal: AbortSignal.timeout(25_000) })).text())
+    const sets = [['sanrentan', O3T, got3t.length === 120 ? got3t : null], ['sanrenpuku', O3F, got3f.length === 20 ? got3f : null],
+      ['nirentan', O2T, got2.length === 45 ? got2.slice(0, 30) : null], ['nirenpuku', O2F, got2.length === 45 ? got2.slice(30, 45) : null]]
+    let n = 0
+    for (let a = 1; ; a++) {
+      try {
+        db.exec('BEGIN IMMEDIATE')
+        for (const [kind, order, v] of sets) if (v) { order.forEach((c, i) => insO.run(r.race_id, kind, c, v[i])); n += v.length }
+        if (n) insOM.run(r.race_id, new Date().toISOString(), left)
+        db.exec('COMMIT'); break
+      } catch (e) { try { db.exec('ROLLBACK') } catch {} ; await sleep(Math.min(20_000, 1_000 * a)) }
+    }
+    return n
+  }
   for (const r of all(`SELECT race_id FROM before_race f WHERE status='ok' AND race_id LIKE ?
       AND EXISTS (SELECT 1 FROM before_info b WHERE b.race_id=f.race_id AND b.ex_time IS NOT NULL)`, DAY.replace(/-/g, '') + '%'))
     done.add(r.race_id)
@@ -221,7 +259,7 @@ if (LIVE) {
   let got = 0
   for (;;) {
     if (!FIXED && jst().toISOString().slice(0, 10) !== DAY) {
-      DAY = jst().toISOString().slice(0, 10); last.clear(); done.clear()
+      DAY = jst().toISOString().slice(0, 10); last.clear(); done.clear(); snaps.clear()
       console.log(`=== 日付が変わった → ${DAY} ===`)
     }
     const races = all(`SELECT race_id, jcd, race_no, deadline FROM race_meta WHERE date=? AND deadline IS NOT NULL ORDER BY deadline`, DAY)
@@ -260,9 +298,21 @@ if (LIVE) {
       }
       await sleep(Math.max(1000, DELAY))
     }
-    // 次のレースまで間があれば長めに待つ
+    // 締切前オッズ：20分前と5分前の2回
+    for (const r of open) {
+      const left = mins(r.deadline) - mins(hm())
+      const want = left <= 5 ? 2 : left <= 20 ? 1 : 0
+      if (want > (snaps.get(r.race_id) ?? 0) && left >= 0) {
+        snaps.set(r.race_id, want)
+        try { const n = await snapOdds(r, left); if (n) console.log(`${hm()} ${r.race_id} オッズ ${n}通り（締切${left}分前）`) }
+        catch (e) { console.log(`${hm()} ${r.race_id} オッズ取得失敗 ${e.message}`) }
+        await sleep(1000)
+      }
+    }
+    // 次のレースまで間があれば長めに待つ（締切25分以内のレースがあれば1分おき）
     const next = open.find((r) => !done.has(r.race_id))
-    const wait = next ? Math.max(0, mins(next.deadline) - now - 20) : 60
+    const soon = open.some((r) => mins(r.deadline) - now <= 25)
+    const wait = soon ? 0 : next ? Math.max(0, mins(next.deadline) - now - 20) : 60
     await sleep(Math.min(Math.max(60, wait * 60), 900) * 1000)
   }
   db.close(); process.exit(0)
