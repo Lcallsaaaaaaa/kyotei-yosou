@@ -1,0 +1,34 @@
+# 競艇予想：gitに載せるのはコードと説明書だけ。データと出力は載せない。
+#
+# ★データベース（data/boatrace.db）は19GBあり、GitHubは100MiB超のファイルを受け付けない。
+#   データは別の置き場所（公開用サーバー）で扱う。サイト構成計画.md を参照。
+# ★data/ には設定ファイル（notify.json など）も入る。鍵やトークンを載せないためにも丸ごと外す。
+
+# データ・学習モデル・予想ファイル
+data/
+
+# 実行ログ
+logs/
+
+# 書き出したCSV・見本（作り直せるもの）
+export/
+GPT用/data/
+GPT用.zip
+
+# その日の出力・試しの結果
+daily/
+配信/
+*-result.txt
+pred-now.txt
+pred820.txt
+pred820-window.json
+picks-test.txt
+today-pred.txt
+
+# Node・OS
+node_modules/
+*.log
+Thumbs.db
+desktop.ini
+.env
+.env.*

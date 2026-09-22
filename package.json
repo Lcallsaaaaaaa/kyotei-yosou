@@ -1,0 +1,13 @@
+{
+  "name": "boatrace-data",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ボートレース過去データ収集・集計基盤（競走成績K / 番組表B）",
+  "scripts": {
+    "download": "node scripts/download.mjs",
+    "extract": "node scripts/extract.mjs",
+    "parse": "node scripts/parse.mjs",
+    "daily": "node scripts/daily.mjs"
+  }
+}
