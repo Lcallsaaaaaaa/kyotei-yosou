@@ -793,8 +793,28 @@ function venueOf(db, jcd) {
     const tot = km.reduce((a, x) => a + x.n, 0)
     const pay = db.prepare(`SELECT AVG(p.amount) a, COUNT(*) n, SUM(p.amount>=10000) man FROM payouts p JOIN races r ON r.race_id=p.race_id
       WHERE r.jcd=? AND r.date>=? AND p.bet_type='sanrentan'`).get(jcd, from)
+    // ★攻略記事用（2026-09-23）：1コースの強さが条件でどう変わるか・コースごとの勝ち方・当地で強い選手
+    const c1 = db.prepare(`SELECT r.deadline, r.wave, r.wind_speed, r.grade, e.rank_num FROM entries e JOIN races r ON r.race_id=e.race_id
+      WHERE r.jcd=? AND r.date>=? AND e.course=1 AND e.rank_num IS NOT NULL`).all(jcd, from)
+    const rate = (arr) => ({ races: arr.length, win_rate: pct(arr.filter((x) => x.rank_num === 1).length, arr.length) })
+    const cond = (pairs) => pairs.map(([label, f]) => ({ label, ...rate(c1.filter(f)) })).filter((x) => x.races >= 30)
+    const kmc = db.prepare(`SELECT e.course, r.kimarite k, COUNT(*) n FROM entries e JOIN races r ON r.race_id=e.race_id
+      WHERE r.jcd=? AND r.date>=? AND e.rank_num=1 AND r.kimarite IS NOT NULL AND e.course+0 BETWEEN 1 AND 6 GROUP BY e.course, r.kimarite`).all(jcd, from)
+    const local = db.prepare(`SELECT e.racer_id, COUNT(*) n, SUM(e.rank_num=1) w, SUM(e.rank_num<=2) t2 FROM entries e JOIN races r ON r.race_id=e.race_id
+      WHERE r.jcd=? AND r.date>=? AND e.racer_id IS NOT NULL GROUP BY e.racer_id HAVING n>=20 ORDER BY 1.0*w/n DESC LIMIT 10`).all(jcd, addDays(today(), -730))
+    const nm = db.prepare(`SELECT name, grade FROM racer_period WHERE racer_id=? ORDER BY period DESC LIMIT 1`)
     return {
       jcd, venue: VENUE[jcd], period: { from, to: today() },
+      course1_by_condition: {
+        time: cond([['朝（〜12時）', (x) => x.deadline && x.deadline < '12:00'], ['昼（12〜17時）', (x) => x.deadline >= '12:00' && x.deadline < '17:00'], ['夜（17時〜）', (x) => x.deadline >= '17:00']]),
+        wave: cond([['波0〜2cm', (x) => x.wave != null && x.wave <= 2], ['波3〜5cm', (x) => x.wave >= 3 && x.wave <= 5], ['波6cm以上', (x) => x.wave >= 6]]),
+        wind: cond([['風0〜2m', (x) => x.wind_speed != null && x.wind_speed <= 2], ['風3〜4m', (x) => x.wind_speed >= 3 && x.wind_speed <= 4], ['風5m以上', (x) => x.wind_speed >= 5]]),
+        grade: cond([['一般戦', (x) => !x.grade || x.grade === '一般'], ['グレード戦', (x) => x.grade && x.grade !== '一般']]),
+      },
+      kimarite_by_course: [1, 2, 3, 4, 5, 6].map((c) => { const rs = kmc.filter((x) => x.course === c), t = rs.reduce((a, x) => a + x.n, 0)
+        return { course: c, wins: t, kimarite: rs.sort((a, b) => b.n - a.n).map((x) => ({ kimarite: x.k, share: pct(x.n, t) })) } }),
+      local_top: local.map((x) => { const p = nm.get(x.racer_id); return { racer_id: x.racer_id, name: p?.name ?? null, class: p?.grade ?? null, starts: x.n, win_rate: pct(x.w, x.n), top2_rate: pct(x.t2, x.n) } }),
+      local_top_note: '直近2年・当地20走以上の1着率',
       by_course: course.map((c) => ({ course: c.course, starts: c.n, win_rate: pct(c.w, c.n), top2_rate: pct(c.t2, c.n), top3_rate: pct(c.t3, c.n) })),
       kimarite: km.map((x) => ({ kimarite: x.k, count: x.n, share: pct(x.n, tot) })),
       course1_win_rate_by_month: monthly.map((x) => ({ month: x.m, races: x.n, win_rate: pct(x.w, x.n) })),

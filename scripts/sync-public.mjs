@@ -159,6 +159,48 @@ async function syncCommon() {
   }
   await put(rd)
 }
+// ---------- 記事（ニュース・場の攻略） ----------
+// ニュース：content/news/*.md（scripts/news.mjs の自動生成＋人やGPTが書いたもの）→ news/index と news/<名前>
+// 場の攻略：データから作る要点（全国平均と比べた事実だけ）＋ content/venues/NN.md（人が書く部分）→ guide/<場>
+function venueGuide(jcd, v, avg, dem, manual, news) {
+  const nat1 = avg?.national?.[0]?.win_rate, natMan = dem?.national?.over_10000_rate
+  const c1 = v.by_course?.[0]?.win_rate, man = v.trifecta?.over_10000_rate
+  const cmp = (a, b, hi, lo) => (a == null || b == null ? '' : a - b >= 3 ? hi : b - a >= 3 ? lo : '全国平均並み')
+  const pts = []
+  if (c1 != null) pts.push(`1コースの1着率は${c1.toFixed(1)}%（全国平均${nat1?.toFixed(1) ?? '―'}%）。${cmp(c1, nat1, 'インが強い水面です。', 'インが弱く、外からの決着が多い水面です。')}`)
+  if (man != null) pts.push(`3連単の万舟率は${man.toFixed(1)}%（全国${natMan?.toFixed(1) ?? '―'}%）、平均配当は${v.trifecta.avg_payout?.toLocaleString() ?? '―'}円。${cmp(man, natMan, '荒れやすい場です。', '堅く決まりやすい場です。')}`)
+  const ext = (list, label) => {
+    if (!list || list.length < 2) return
+    const s = [...list].sort((a, b) => b.win_rate - a.win_rate)
+    if (s[0].win_rate - s.at(-1).win_rate >= 4) pts.push(`${label}で見ると、1コースの1着率は「${s[0].label}」が${s[0].win_rate.toFixed(1)}%でいちばん高く、「${s.at(-1).label}」は${s.at(-1).win_rate.toFixed(1)}%まで下がります。`)
+  }
+  ext(v.course1_by_condition?.wave, '波の高さ'); ext(v.course1_by_condition?.wind, '風の強さ'); ext(v.course1_by_condition?.time, '時間帯')
+  const k2 = v.kimarite_by_course?.[1]?.kimarite?.[0], k3 = v.kimarite_by_course?.[2]?.kimarite?.[0]
+  if (k2) pts.push(`2コースの勝ちは「${k2.kimarite}」が${k2.share.toFixed(1)}%${k3 ? `、3コースの勝ちは「${k3.kimarite}」が${k3.share.toFixed(1)}%` : ''}。`)
+  const best = [...(v.course1_win_rate_by_race_no ?? [])].sort((a, b) => b.win_rate - a.win_rate)
+  if (best.length) pts.push(`1コースがいちばん強いのは${best[0].race_no}R（${best[0].win_rate.toFixed(1)}%）、いちばん弱いのは${best.at(-1).race_no}R（${best.at(-1).win_rate.toFixed(1)}%）。`)
+  if (v.local_top?.length) pts.push(`当地で1着率が高い選手：${v.local_top.slice(0, 3).map((r) => `${r.name}（${r.win_rate.toFixed(1)}%・${r.starts}走）`).join('、')}。`)
+  return { jcd, venue: v.venue, period: v.period, points: pts, points_note: '直近1年（当地の選手は直近2年）の出走から当サイトが集計した事実だけです',
+    manual: manual ? { title: manual.meta.title, updated: manual.meta.date ?? null, html: manual.html } : null,
+    related_news: news.filter((n) => n.meta.venue === jcd).slice(0, 5).map((n) => ({ slug: n.slug, title: n.meta.title, date: n.meta.date })) }
+}
+async function syncArticles() {
+  const { loadDir } = await import('./md.mjs')
+  const news = loadDir(join(ROOT, 'content', 'news'))
+    .sort((a, b) => String(b.meta.date ?? '').localeCompare(String(a.meta.date ?? '')) || b.slug.localeCompare(a.slug))
+  const docs = [['news/index', { articles: news.slice(0, 200).map((n) => ({ slug: n.slug, title: n.meta.title, date: n.meta.date ?? null,
+    tags: n.meta.tags, venue: n.meta.venue, auto: n.slug.startsWith('auto-'), summary: n.summary })) }]]
+  for (const n of news.slice(0, 200)) docs.push([`news/${n.slug}`, { slug: n.slug, title: n.meta.title, date: n.meta.date ?? null, tags: n.meta.tags,
+    venue: n.meta.venue, auto: n.slug.startsWith('auto-'), html: n.html }])
+  const manual = new Map(loadDir(join(ROOT, 'content', 'venues')).map((m) => [Number(m.slug), m]))
+  const avg = call('/api/v1/analysis?kind=average'), dem = call('/api/v1/analysis?kind=demoku')
+  for (let j = 1; j <= 24; j++) {
+    const v = call(`/api/v1/venue?jcd=${j}`)?.venue
+    if (v) docs.push([`guide/${j}`, venueGuide(j, v, avg, dem, manual.get(j), news)])
+  }
+  await put(docs)
+}
+
 async function syncMeta(dates) {
   await put([['meta', { site: '凪の予想配信', dates, updated_at: jst().toISOString().replace('T', ' ').slice(0, 16) }]])
 }
@@ -169,6 +211,7 @@ if (!LIVE) {
   const t0 = Date.now()
   for (const d of dates) log(`${d}: ${await syncDay(d, d === d0)}レース`)
   await syncCommon()
+  await syncArticles()
   await syncMeta(dates.filter((d) => existsSync(join(ROOT, 'data', `predict-${d}.json`)) || d <= d0))
   await removeOld(dates)
   log(`${LOCAL ? '書き出し' : '送信'} ${sent}件・変化なしで省略 ${skipped}件（${((Date.now() - t0) / 1000).toFixed(0)}秒）${LOCAL ? '　→ ' + OUT : ''}`)
@@ -188,6 +231,7 @@ for (;;) {
     if (full) {
       await syncDay(addDays(d0, 1), false)
       await syncCommon()
+      await syncArticles()
       await syncMeta([addDays(d0, -1), d0, addDays(d0, 1)])
       await removeOld([addDays(d0, -1), d0, addDays(d0, 1)])
       lastFull = jst().getUTCHours() === 7 ? d0 + '-7' : d0

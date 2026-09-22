@@ -148,3 +148,76 @@ td .meta { display: block; font-size: 11px; color: var(--ink-2); }
 .foot { max-width: 980px; margin: 24px auto 0; padding: 18px 16px 40px; font-size: 12.5px; color: var(--ink-2); border-top: 1px solid var(--line); }
 .foot p { margin: 4px 0; }
 @media (prefers-reduced-motion: no-preference) { .probbar i, .km i { transition: width .4s ease; } }
+
+/* ---------- 記事（ニュース・攻略） ---------- */
+.news-list { display: grid; gap: 8px; }
+.news-item { display: grid; gap: 2px; text-decoration: none; color: var(--ink); background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--r); padding: 12px 14px; box-shadow: var(--shadow); }
+.news-item b { font-size: 15px; line-height: 1.5; }
+.news-date { font-size: 12px; color: var(--ink-2); }
+.news-sum { font-size: 12.5px; color: var(--ink-2); }
+.chips { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 12px; }
+.chips a { flex: none; text-decoration: none; font-size: 13px; font-weight: 700; padding: 5px 12px; border-radius: 999px;
+  background: var(--panel); border: 1px solid var(--line); color: var(--ink-2); }
+.chips a.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.article h1 { font-size: 22px; line-height: 1.45; margin: 8px 0 14px; }
+.article-body { font-size: 15.5px; line-height: 1.85; }
+.article-body h2 { font-size: 17px; margin: 24px 0 8px; padding-left: 10px; border-left: 4px solid var(--accent); }
+.article-body h3 { font-size: 15.5px; margin: 18px 0 6px; }
+.article-body ul, .article-body ol { padding-left: 1.3em; }
+.article-body blockquote { margin: 12px 0; padding: 8px 12px; border-left: 3px solid var(--line); color: var(--ink-2); }
+.article-body table td, .article-body table th { white-space: normal; }
+.guide ul { margin: 0; padding-left: 1.2em; }
+.guide li { margin: 6px 0; line-height: 1.7; }
+h3 { font-size: 14px; margin: 10px 0 6px; color: var(--ink-2); }
+
+/* ---------- スマホの下のタブバー ---------- */
+.tabbar, .more { display: none; }
+@media (max-width: 719px) {
+  body { font-size: 15px; padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+  .top { padding: 10px 16px; }
+  .top .nav { display: none; }
+  .brand-name { font-size: 18px; }
+  main { padding: 12px 12px 20px; }
+  h1 { font-size: 19px; }
+  h2 { font-size: 15.5px; margin: 20px 0 8px; }
+  .tabbar { display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+    background: var(--panel); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom);
+    box-shadow: 0 -2px 12px rgba(20, 35, 43, .06); }
+  .tabbar a, .tabbar button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    min-height: 58px; font: inherit; font-size: 10.5px; font-weight: 700; color: var(--ink-2); text-decoration: none;
+    background: none; border: 0; cursor: pointer; }
+  .tabbar svg { width: 23px; height: 23px; }
+  .tabbar .on { color: var(--accent); }
+  .more:not([hidden]) { display: grid; position: fixed; right: 10px; bottom: calc(66px + env(safe-area-inset-bottom)); z-index: 21;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 8px 30px rgba(20, 35, 43, .18); min-width: 190px; overflow: hidden; }
+  .more a { padding: 14px 18px; text-decoration: none; color: var(--ink); font-weight: 700; border-bottom: 1px solid var(--line); }
+  .more a:last-child { border-bottom: 0; }
+  .more a.on { color: var(--accent); }
+
+  /* レース詳細：タブを上に貼り付ける（ヘッダーの下） */
+  .tabs { position: sticky; top: 49px; z-index: 5; background: var(--ground); margin: 10px -12px 10px; padding: 0 12px; }
+  .tabs button { padding: 11px 11px; font-size: 13.5px; }
+  .rnav { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; overflow: visible; }
+  .rnav a { text-align: center; padding: 7px 0; }
+
+  /* 表：左端（枠・選手）を固定して、横に動かしても誰の数字か分かるように */
+  .scroll table th:first-child, .scroll table td:first-child { position: sticky; left: 0; z-index: 2; background: var(--panel);
+    box-shadow: 1px 0 0 var(--line); }
+  .scroll table th:first-child { background: var(--panel-2); z-index: 3; }
+  th, td { padding: 9px 7px; }
+  table { font-size: 13px; }
+  td .name { font-size: 13.5px; }
+
+  /* 数字のカードは2列 */
+  .stats { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .stat b { font-size: 20px; }
+  .grid.two { grid-template-columns: 1fr; }
+
+  /* レース一覧のボタンは押しやすく */
+  .rc { min-height: 46px; display: flex; flex-direction: column; justify-content: center; }
+  .days a { padding: 8px 14px; }
+  .conds span { font-size: 12px; }
+  .km { grid-template-columns: 6.5em 1fr 3.3em; }
+  .foot { padding-bottom: 20px; }
+}

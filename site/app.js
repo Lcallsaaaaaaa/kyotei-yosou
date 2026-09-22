@@ -39,7 +39,11 @@
   const jstToday = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10)
   const nowHM = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(11, 16)
   const bar = (p, max = 100) => `<span class="probbar"><i style="width:${Math.max(2, (p ?? 0) / max * 70)}px"></i><b>${pct(p)}</b></span>`
-  const setNav = (k) => document.querySelectorAll('.nav a').forEach((a) => a.classList.toggle('on', a.dataset.nav === k))
+  const MORE = ['schedule', 'analysis', 'venues', 'results']
+  const setNav = (k) => {
+    document.querySelectorAll('[data-nav]').forEach((a) => a.classList.toggle('on', a.dataset.nav === k || (a.dataset.nav === 'more' && MORE.includes(k))))
+    const m = document.getElementById('more'); if (m) { m.hidden = true; document.querySelector('.more-btn')?.setAttribute('aria-expanded', 'false') }
+  }
   const view = (html) => { app.innerHTML = html; window.scrollTo(0, 0) }
   const fail = (e) => view(`<p class="empty">${esc(e.message || e)}</p>`)
 
@@ -112,9 +116,14 @@
         <div class="panel"><b>スタートアラート</b> <span class="sub">${esc(F.alerts.rules.start)}</span><ol class="rank">${pick(F.alerts.start, (x) =>
           `<li><span>${rlink(x)}</span><span class="num">${waku(x.outer_lane)}が${waku(x.inner_lane)}より${dash(x.diff)}秒速い</span></li>`)}</ol></div>
       </div>` : ''
-    view(`<h1>出走表 <span class="sub">${md(date)}(${wd(date)})・${byV.size}場 ${j.races.length}レース</span></h1>${tabs}${feat}${status}
-      <h2>レース一覧</h2><div class="grid">${venues}</div>
-      <p class="note">「無料」の付いたレースは、1着確率80%以上の本命を単勝1点で無料公開しています。橙の枠は次に締め切るレースです。</p>`)
+    const NI = await doc('news/index')
+    const topNews = (NI?.articles ?? []).slice(0, 3)
+    const newsBlock = topNews.length ? `<h2>ニュース <a class="sub" href="#/news">もっと見る →</a></h2><div class="news-list">${topNews.map(newsItem).join('')}</div>` : ''
+    // 並びは「レース一覧 → 特集・アラート → 場状況 → ニュース」。スマホでまず出走表に届くように（2026-09-23）
+    view(`<h1>出走表 <span class="sub">${md(date)}(${wd(date)})・${byV.size}場 ${j.races.length}レース</span></h1>${tabs}
+      <div class="grid" style="margin-top:12px">${venues}</div>
+      <p class="note">「無料」の付いたレースは、1着確率80%以上の本命を単勝1点で無料公開しています。橙の枠は次に締め切るレースです。</p>
+      ${feat}${status}${newsBlock}`)
   }
 
   // ---------- レース詳細 ----------
@@ -300,17 +309,28 @@
   }
   async function venue(jcd) {
     setNav('venues')
-    const j = await doc(`venue/${jcd}`)
+    const [j, G] = await Promise.all([doc(`venue/${jcd}`), doc(`guide/${jcd}`)])
     const V = j?.venue
     if (!V) return view('<p class="empty">この場のデータはまだありません。</p>')
-    view(`<h1>${esc(V.venue)} <span class="sub">直近1年（${esc(V.period.from)}〜）</span></h1>
-      <div class="stats"><div class="stat"><span>1コース1着率</span><b>${pct(V.by_course[0]?.win_rate)}</b></div>
+    const kmBars = (list, key = 'share') => list.map((k) => `<span>${esc(k.kimarite ?? k.label)}</span><i style="width:${Math.max(2, k[key])}%"></i><span class="num">${pct(k[key])}</span>`).join('')
+    const cond = V.course1_by_condition ?? {}
+    const condBlock = (title, list) => list?.length ? `<div><h3>${title}</h3><div class="panel km">${list.map((k) => `<span>${esc(k.label)}</span><i style="width:${Math.max(2, k.win_rate)}%"></i><span class="num">${pct(k.win_rate)}</span>`).join('')}</div></div>` : ''
+    view(`<h1>${esc(V.venue)}の攻略</h1><div class="sub">直近1年（${esc(V.period.from)}〜）のデータから</div>
+      <div class="stats" style="margin-top:12px"><div class="stat"><span>1コース1着率</span><b>${pct(V.by_course[0]?.win_rate)}</b></div>
         <div class="stat"><span>3連単の平均配当</span><b>${yen(V.trifecta.avg_payout)}</b></div>
         <div class="stat"><span>万舟率</span><b>${pct(V.trifecta.over_10000_rate)}</b></div></div>
+      ${G?.points?.length ? `<h2>攻略の要点</h2><div class="panel guide"><ul>${G.points.map((p) => `<li>${esc(p)}</li>`).join('')}</ul><p class="note">${esc(G.points_note)}</p></div>` : ''}
+      ${G?.manual ? `<h2>${esc(G.manual.title)}</h2><div class="panel article-body">${G.manual.html}</div>${G.manual.updated ? `<p class="note">更新：${esc(G.manual.updated)}</p>` : ''}` : ''}
+      ${G?.related_news?.length ? `<h2>${esc(V.venue)}のニュース</h2><div class="news-list">${G.related_news.map((n) => `<a class="news-item" href="#/news/${esc(n.slug)}"><span class="news-date">${n.date ? md(n.date) : ''}</span><b>${esc(n.title)}</b></a>`).join('')}</div>` : ''}
       <h2>コース別</h2><div class="scroll"><table><thead><tr><th class="l">コース</th><th>1着率</th><th>2連対率</th><th>3連対率</th><th>出走</th></tr></thead><tbody>${
         V.by_course.map((c) => `<tr><td class="l">${waku(c.course)}</td><td>${bar(c.win_rate, V.by_course[0].win_rate)}</td><td>${pct(c.top2_rate)}</td><td>${pct(c.top3_rate)}</td><td>${c.starts.toLocaleString()}</td></tr>`).join('')}</tbody></table></div>
-      <h2>決まり手</h2><div class="panel km">${V.kimarite.map((k) => `<span>${esc(k.kimarite)}</span><i style="width:${Math.max(2, k.share)}%"></i><span class="num">${pct(k.share)}</span>`).join('')}</div>
-      <h2>1コースの強さ（レース番号別）</h2><div class="panel km">${V.course1_win_rate_by_race_no.map((k) => `<span>${k.race_no}R</span><i style="width:${Math.max(2, k.win_rate)}%"></i><span class="num">${pct(k.win_rate)}</span>`).join('')}</div>`)
+      <h2>1コースの1着率が条件でどう変わるか</h2><div class="grid two">${condBlock('時間帯', cond.time)}${condBlock('波の高さ', cond.wave)}${condBlock('風の強さ', cond.wind)}${condBlock('グレード', cond.grade)}</div>
+      <h2>コースごとの勝ち方</h2><div class="scroll"><table><thead><tr><th class="l">コース</th><th>1着数</th><th class="l">決まり手</th></tr></thead><tbody>${
+        (V.kimarite_by_course ?? []).map((c) => `<tr><td class="l">${waku(c.course)}</td><td>${c.wins}</td><td class="l">${c.kimarite.slice(0, 3).map((k) => `${esc(k.kimarite)} ${pct(k.share)}`).join('・')}</td></tr>`).join('')}</tbody></table></div>
+      <h2>1コースの強さ（レース番号別）</h2><div class="panel km">${V.course1_win_rate_by_race_no.map((k) => `<span>${k.race_no}R</span><i style="width:${Math.max(2, k.win_rate)}%"></i><span class="num">${pct(k.win_rate)}</span>`).join('')}</div>
+      <h2>決まり手（全体）</h2><div class="panel km">${kmBars(V.kimarite)}</div>
+      ${V.local_top?.length ? `<h2>当地で強い選手</h2><div class="scroll"><table><thead><tr><th class="l">選手</th><th>出走</th><th>1着率</th><th>2連対率</th></tr></thead><tbody>${
+        V.local_top.map((r) => `<tr><td class="l"><a class="name" href="#/racer/${r.racer_id}">${esc(r.name)}</a> ${cls(r.class)}</td><td>${r.starts}</td><td>${pct(r.win_rate)}</td><td>${pct(r.top2_rate)}</td></tr>`).join('')}</tbody></table></div><p class="note">${esc(V.local_top_note)}</p>` : ''}`)
   }
 
   // ---------- 選手 ----------
@@ -459,6 +479,31 @@
     })
   }
 
+  // ---------- ニュース ----------
+  const newsItem = (n) => `<a class="news-item" href="#/news/${esc(n.slug)}"><span class="news-date">${n.date ? md(n.date) : ''}${n.auto ? ' <span class="badge gray">自動</span>' : ''}</span>
+    <b>${esc(n.title)}</b>${n.summary ? `<span class="news-sum">${esc(n.summary.slice(0, 70))}…</span>` : ''}</a>`
+  async function newsList(tag) {
+    setNav('news')
+    const j = await doc('news/index')
+    const all = j?.articles ?? []
+    const tags = [...new Set(all.flatMap((n) => n.tags ?? []))].slice(0, 12)
+    const list = tag ? all.filter((n) => (n.tags ?? []).includes(tag)) : all
+    view(`<h1>ニュース</h1>
+      ${tags.length ? `<div class="chips"><a href="#/news" class="${tag ? '' : 'on'}">すべて</a>${tags.map((t) => `<a href="#/news/tag/${encodeURIComponent(t)}" class="${t === tag ? 'on' : ''}">${esc(t)}</a>`).join('')}</div>` : ''}
+      <div class="news-list">${list.map(newsItem).join('') || '<p class="empty">記事はまだありません。</p>'}</div>
+      <p class="note">「自動」の記事は、公式データから当サイトが自動で作ったものです（データにある事実だけで書いています）。</p>`)
+  }
+  async function article(slug) {
+    setNav('news')
+    const a = await doc(`news/${slug}`)
+    if (!a) return view('<p class="empty">この記事は見つかりません。</p>')
+    view(`<article class="article"><div class="sub">${a.date ? md(a.date) : ''}${a.auto ? '　<span class="badge gray">自動生成</span>' : ''}${(a.tags ?? []).map((t) => ` <a class="badge" href="#/news/tag/${encodeURIComponent(t)}">${esc(t)}</a>`).join('')}</div>
+      <h1>${esc(a.title)}</h1><div class="article-body">${a.html}</div>
+      ${a.venue ? `<p><a href="#/venue/${a.venue}">${VENUES[a.venue]}の攻略ページへ →</a></p>` : ''}
+      <p class="note">${a.auto ? 'この記事は公式データから自動で作成しました。' : ''}予想は的中を約束するものではありません。舟券の購入は20歳からです。</p>
+      <p><a href="#/news">← ニュース一覧へ</a></p></article>`)
+  }
+
   // ---------- 振り分け ----------
   async function route() {
     const p = location.hash.replace(/^#\/?/, '').split('/')
@@ -472,12 +517,19 @@
       if (p[0] === 'venue') return await venue(Number(p[1]))
       if (p[0] === 'racer') return await racer(Number(p[1]))
       if (p[0] === 'racers') return await racers(decodeURIComponent(p[1] ?? ''))
+      if (p[0] === 'news' && p[1] === 'tag') return await newsList(decodeURIComponent(p[2] ?? ''))
+      if (p[0] === 'news' && p[1]) return await article(p[1])
+      if (p[0] === 'news') return await newsList()
       if (p[0] === 'schedule') return await schedule()
       if (p[0] === 'meeting') return await meeting(Number(p[1]), p[2])
       if (p[0] === 'analysis') return await analysis(p[1])
       return await home()
     } catch (e) { fail(e) }
   }
+  document.querySelector('.more-btn')?.addEventListener('click', (e) => {
+    const m = document.getElementById('more'); m.hidden = !m.hidden
+    e.currentTarget.setAttribute('aria-expanded', String(!m.hidden))
+  })
   window.addEventListener('hashchange', route)
   route()
 })()
