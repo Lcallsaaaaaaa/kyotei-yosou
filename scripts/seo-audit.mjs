@@ -66,6 +66,36 @@ for (const [name, re] of [['canonical', /link\[rel="canonical"\]/], ['OGP', /og:
   ['構造化データ', /application\/ld\+json/], ['twitter card', /twitter:card/]])
   if (re.test(app)) OK(`${name} を出している`); else NG(`${name} を出していない`)
 
+console.log('■ 見つからないページ・重複')
+if (/return notFound\(\)/.test(app)) OK('知らないURLは「見つかりません」を返す')
+else NG('知らないURLでトップページを返している（同じ中身のURLが無数にできて評価が下がる）')
+if (/noindex,follow/.test(app)) OK('検索に出さない印を出せる')
+else NG('noindex を出していない。中身の無いページまで検索に載る')
+for (const [name, re] of [['レースのタブ', /canonical: `\/race\/\$\{id\}`/], ['きょうの日付', /canonical: date === jstToday\(\)/],
+  ['データ分析', /canonical: `\/analysis\//]])
+  if (re.test(app)) OK(`${name}：同じ中身のURLを1つにまとめている`); else NG(`${name}：URLがばらけたまま（重複コンテンツ）`)
+const badGuard = /meta\([^\n]*\n?[^\n]*\n?[^\n]*\n\s+if \(!(V|P|M|a)\) return/.test(app)
+if (badGuard) NG('データが無いときに meta() が先に動いて落ちる')
+else OK('データが無いときは meta() より先に返している')
+
+console.log('■ 信用されるための固定ページ')
+for (const [f, name] of [['content/pages/about.md', 'このサイトについて'], ['content/pages/privacy.md', 'プライバシーポリシー']])
+  if (existsSync(join(ROOT, f))) OK(`${name} あり`); else NG(`${name} が無い`)
+if (/racersAll/.test(app)) OK('選手の全一覧あり（一覧に出ない選手にもリンクが通る）')
+else WA('選手一覧は300人までしか出ないので、残りがどこからもリンクされていない')
+if (/foot-nav/.test(html)) OK('フッターからサイト情報へリンク')
+else WA('フッターに このサイトについて・プライバシーポリシー へのリンクが無い')
+
+console.log('■ 表示の速さ・使いやすさ')
+const wghts = (html.match(/wght@([\d;]+)/g) ?? []).join(',')
+const nW = (wghts.match(/\d{3}/g) ?? []).length
+if (nW > 4) WA(`日本語の書体を ${nW}種類 読み込んでいる（1種類で数百KB。表示が遅くなる）`)
+else OK(`書体は ${nW}種類`)
+if (/class="skip"/.test(html)) OK('「本文へ移動」あり'); else WA('キーボードの人向けの「本文へ移動」が無い')
+if (/aria-current/.test(app)) OK('いまどこにいるかを読み上げに伝えている'); else WA('aria-current が無い')
+if (existsSync(join(SITE, '_headers'))) OK('_headers あり'); else WA('_headers が無い')
+if (!existsSync(join(SITE, 'ogp.png'))) WA('SNSに貼ったときの画像（site/ogp.png）が無い')
+
 console.log('■ アクセス解析')
 if (!cfg.gaId) WA('config.js の gaId が空（GA4 を読み込まない）')
 else if (!/^G-[A-Z0-9]{6,}$/.test(cfg.gaId)) NG(`gaId の形がおかしい：${cfg.gaId}`)

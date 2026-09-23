@@ -38,3 +38,6 @@ site/_local/
 
 # Search Console の書き出し（自分用のデータ）
 gsc-export/
+
+# sitemap は毎日 sync が作り直す（数千行が毎日変わるので履歴に入れない。robots.txt は残す）
+site/sitemap.xml

@@ -258,6 +258,9 @@ async function syncArticles() {
     tags: n.meta.tags, venue: n.meta.venue, summary: n.summary })) }]]
   for (const n of news.slice(0, 200)) docs.push([`news/${n.slug}`, { slug: n.slug, title: n.meta.title, date: n.meta.date ?? null, tags: n.meta.tags,
     venue: n.meta.venue, summary: n.summary, html: n.html }])
+  // 固定のページ（このサイトについて・プライバシーポリシー）。無いと信用されず、検索でも不利になる
+  for (const p of loadDir(join(ROOT, 'content', 'pages')))
+    docs.push([`page/${p.slug}`, { slug: p.slug, title: p.meta.title, description: p.meta.description ?? p.summary, html: p.html }])
   const manual = new Map(loadDir(join(ROOT, 'content', 'venues')).map((m) => [Number(m.slug), m]))
   const avg = call('/api/v1/analysis?kind=average'), dem = call('/api/v1/analysis?kind=demoku')
   for (let j = 1; j <= 24; j++) {
@@ -280,13 +283,14 @@ function siteConfig() {
 function writeSeoFiles() {
   const cfg = siteConfig()
   const base = (cfg.siteUrl || '').replace(/\/+$/, '')
-  const paths = new Set(['/', '/tenkai', '/news', '/venues', '/racers', '/schedule', '/results', '/member'])
+  const paths = new Set(['/', '/tenkai', '/news', '/venues', '/racers', '/racers/all', '/schedule', '/results', '/member'])
   for (const k of allKeys) {
     if (k.startsWith('paid/')) continue
     const [kind, ...rest] = k.split('/')
     if (kind === 'race' || kind === 'racer' || kind === 'venue' || kind === 'analysis') paths.add(`/${kind}/${rest.join('/')}`)
     else if (kind === 'meeting') paths.add(`/meeting/${rest.join('/')}`)
     else if (kind === 'news' && rest[0] && rest[0] !== 'index') paths.add(`/news/${rest[0]}`)
+    else if (kind === 'page') paths.add(`/${rest[0]}`)
   }
   const day = today()
   const dir = join(ROOT, 'site')

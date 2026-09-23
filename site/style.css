@@ -45,7 +45,7 @@ a { color: var(--accent); }
 .brand { display: flex; align-items: center; gap: 8px; text-decoration: none; color: var(--ink); }
 .brand-mark { width: 22px; height: 22px; border-radius: 6px; background:
   radial-gradient(circle at 50% 120%, transparent 55%, var(--panel) 56% 62%, transparent 63%), var(--accent); }
-.brand-name { font-family: var(--font-brand); font-weight: 800; font-size: 19px; letter-spacing: .04em; }
+.brand-name { font-family: var(--font-brand); font-weight: 700; font-size: 19px; letter-spacing: .04em; }
 .nav { display: flex; gap: 4px; overflow-x: auto; margin-left: auto; }
 .nav a { text-decoration: none; color: var(--ink-2); padding: 6px 12px; border-radius: 999px; font-weight: 700; font-size: 14px; white-space: nowrap; }
 .nav a.on { background: var(--accent); color: #fff; }
@@ -79,7 +79,7 @@ h2 { font-size: 16px; margin: 22px 0 10px; }
 /* 場ごとのレース一覧 */
 .venue { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; box-shadow: var(--shadow); }
 .venue-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
-.venue-name { font-weight: 900; font-size: 17px; }
+.venue-name { font-weight: 700; font-size: 17px; }
 .venue-series { font-size: 12.5px; color: var(--ink-2); }
 .races { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
 @media (min-width: 560px) { .races { grid-template-columns: repeat(12, 1fr); } }
@@ -101,7 +101,7 @@ h2 { font-size: 16px; margin: 22px 0 10px; }
 .cls-B1 { background: #2f6fb3; color: #fff; } .cls-B2 { background: #7b8a90; color: #fff; }
 
 /* 枠番 */
-.waku { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; font-weight: 900; font-size: 14px; }
+.waku { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; font-weight: 700; font-size: 14px; }
 .w1 { background: #fff; color: #111; border: 1.5px solid #9aa7a6; } .w2 { background: #1b1b1b; color: #fff; }
 .w3 { background: #d8322b; color: #fff; } .w4 { background: #1f5fbf; color: #fff; }
 .w5 { background: #f2c500; color: #111; } .w6 { background: #179a4b; color: #fff; }
@@ -121,13 +121,13 @@ th:first-child, td:first-child, td.l, th.l { text-align: left; }
 tr:last-child td { border-bottom: 0; }
 td .name { font-weight: 700; font-size: 14px; }
 td .meta { display: block; font-size: 11px; color: var(--ink-2); }
-.best { color: var(--signal); font-weight: 900; }
+.best { color: var(--signal); font-weight: 700; }
 .probbar { display: inline-flex; align-items: center; gap: 6px; min-width: 110px; justify-content: flex-end; }
 .probbar i { display: inline-block; height: 8px; border-radius: 4px; background: var(--bar); }
 .hit { color: var(--hit); font-weight: 700; } .miss { color: var(--miss); }
 
 /* 展開予想 */
-.shape { font-size: 18px; font-weight: 900; }
+.shape { font-size: 18px; font-weight: 700; }
 .km { display: grid; grid-template-columns: 7.5em 1fr 3.5em; gap: 6px 10px; align-items: center; font-size: 14px; }
 .km i { display: block; height: 10px; border-radius: 5px; background: var(--bar); }
 .lines { margin: 8px 0 0; padding-left: 1.2em; }
@@ -236,9 +236,23 @@ h3 { font-size: 14px; margin: 10px 0 6px; color: var(--ink-2); }
 .combo { display: flex; align-items: center; gap: 6px; background: var(--panel-2); border: 1px solid var(--line);
   border-radius: 10px; padding: 8px 12px; }
 .combo small { color: var(--ink-2); font-size: 12px; }
-.rc.member::after { content: '会員'; display: block; font-size: 9.5px; font-weight: 700; color: var(--signal); }
+.rc.member::after { content: 'AI予想'; display: block; font-size: 9.5px; font-weight: 700; color: var(--signal); }
 @media (max-width: 719px) {
   .picks { gap: 8px; }
   .combo { padding: 8px 10px; }
   .mem-form input { font-size: 16px; }
 }
+
+/* ---------- 読み上げ・キーボードの人向け ---------- */
+.skip { position: absolute; left: -9999px; top: 0; z-index: 100; background: var(--accent); color: #fff;
+  padding: 10px 16px; border-radius: 0 0 10px 0; font-weight: 700; text-decoration: none; }
+.skip:focus { left: 0; }
+
+/* ---------- フッターのリンク ---------- */
+.foot-nav { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 14px 0 6px; }
+.foot-nav a { color: var(--ink-2); text-decoration: underline; }
+
+/* ---------- 選手の全一覧 ---------- */
+.namelist { line-height: 2.1; font-size: 14px; margin: 0 0 6px; }
+.namelist a { text-decoration: none; }
+.namelist a:hover { text-decoration: underline; }
