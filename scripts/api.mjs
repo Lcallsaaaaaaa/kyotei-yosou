@@ -81,7 +81,8 @@ function entriesOf(db, date) {
   return cached('ent|' + date, 6 * HOUR, () => {
     const out = new Map()
     const rows = db.prepare(`SELECT race_id, lane, racer_id, racer_name, age, branch, weight, grade,
-      win_rate_nat, top2_nat, win_rate_loc, top2_loc, motor_no, motor_top2, boat_no, boat_top2, series_result
+      win_rate_nat, top2_nat, win_rate_loc, top2_loc, motor_no, motor_top2, boat_no, boat_top2, series_result,
+      top3_nat, top3_loc, motor_top3, boat_top3, f_official, l_official, avg_st_official
       FROM programs WHERE race_id BETWEEN ? AND ? ORDER BY race_id, lane`).all(ymd(date) + '-', ymd(date) + '-~')
     // ⚠ programs.racer_name は4文字固定幅で長い名前が切れる。racer_period から引く（racecard.mjs と同じ）
     const qN = db.prepare(`SELECT name, kana FROM racer_period WHERE racer_id=? AND period<=? ORDER BY period DESC LIMIT 1`)
@@ -116,10 +117,16 @@ function entriesOf(db, date) {
       out.get(r.race_id).push({
         lane: r.lane, racer_id: r.racer_id, name: x.name ?? r.racer_name, kana: x.kana ?? null,
         class: r.grade, age: r.age, branch: r.branch, weight: r.weight,
-        win_rate_national: r.win_rate_nat, top2_rate_national: r.top2_nat,
-        win_rate_local: r.win_rate_loc, top2_rate_local: r.top2_loc,
-        motor_no: r.motor_no, motor_top2_rate: r.motor_top2, boat_no: r.boat_no, boat_top2_rate: r.boat_top2,
-        avg_st: x.avg_st ?? null, f_count: x.f_count ?? 0, series_result: r.series_result ?? null,
+        // 3連対率と公式の平均ST・F/L は番組表ファイルに無いので、公式のHTML出走表から取っている（racelist.mjs）
+        win_rate_national: r.win_rate_nat, top2_rate_national: r.top2_nat, top3_rate_national: r.top3_nat ?? null,
+        win_rate_local: r.win_rate_loc, top2_rate_local: r.top2_loc, top3_rate_local: r.top3_loc ?? null,
+        motor_no: r.motor_no, motor_top2_rate: r.motor_top2, motor_top3_rate: r.motor_top3 ?? null,
+        boat_no: r.boat_no, boat_top2_rate: r.boat_top2, boat_top3_rate: r.boat_top3 ?? null,
+        // 公式の値があればそれを使い、無いときだけ当サイトの集計にする
+        avg_st: r.avg_st_official ?? x.avg_st ?? null,
+        avg_st_source: r.avg_st_official != null ? 'official' : (x.avg_st != null ? 'site' : null),
+        f_count: r.f_official ?? x.f_count ?? 0, l_count: r.l_official ?? null,
+        series_result: r.series_result ?? null,
       })
     }
     return out

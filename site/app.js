@@ -314,16 +314,27 @@
     const maxP = Math.max(...E.map((e) => e.win_probability ?? 0), 1)
 
     const T = {
-      card: () => `<div class="scroll"><table><thead><tr><th class="l">枠・選手</th><th>全国<br>勝率/2連</th><th>当地<br>勝率/2連</th><th>モーター<br>No/2連</th><th>ボート<br>No/2連</th><th>平均ST</th><th>F</th><th>1着確率</th></tr></thead><tbody>${
+      card: () => {
+        // 3連対率は公式のHTML出走表からしか取れない（番組表ファイルには2連対率まで）。
+        // まだ取れていない日は列ごと出さない（「―」だけの列が並ぶより分かりやすい）
+        const has3 = E.some((e) => e.top3_rate_national != null)
+        const r3 = (v) => (has3 ? `<span class="meta">${dash(v, 1)}%</span>` : '')
+        const official = E.some((e) => e.avg_st_source === 'official')
+        return `<div class="scroll"><table><thead><tr><th class="l">枠・選手</th>
+          <th>全国<br>勝率/2連${has3 ? '/3連' : ''}</th><th>当地<br>勝率/2連${has3 ? '/3連' : ''}</th>
+          <th>モーター<br>No/2連${has3 ? '/3連' : ''}</th><th>ボート<br>No/2連${has3 ? '/3連' : ''}</th>
+          <th>平均ST</th><th>F/L</th><th>1着確率</th></tr></thead><tbody>${
         E.map((e) => `<tr><td>${waku(e.lane)} <a class="name" href="/racer/${e.racer_id}">${esc(e.name)}</a> ${cls(e.class)}
           <span class="meta">${esc(e.branch ?? '')} ${e.age ?? ''}歳 ${e.weight ?? ''}kg</span></td>
-          <td>${dash(e.win_rate_national)}<span class="meta">${dash(e.top2_rate_national, 1)}%</span></td>
-          <td>${dash(e.win_rate_local)}<span class="meta">${dash(e.top2_rate_local, 1)}%</span></td>
-          <td>${e.motor_no ?? '―'}<span class="meta">${dash(e.motor_top2_rate, 1)}%</span></td>
-          <td>${e.boat_no ?? '―'}<span class="meta">${dash(e.boat_top2_rate, 1)}%</span></td>
-          <td>${dash(e.avg_st)}</td><td>${e.f_count ? `<span class="best">F${e.f_count}</span>` : '―'}</td>
+          <td>${dash(e.win_rate_national)}<span class="meta">${dash(e.top2_rate_national, 1)}%</span>${r3(e.top3_rate_national)}</td>
+          <td>${dash(e.win_rate_local)}<span class="meta">${dash(e.top2_rate_local, 1)}%</span>${r3(e.top3_rate_local)}</td>
+          <td>${e.motor_no ?? '―'}<span class="meta">${dash(e.motor_top2_rate, 1)}%</span>${r3(e.motor_top3_rate)}</td>
+          <td>${e.boat_no ?? '―'}<span class="meta">${dash(e.boat_top2_rate, 1)}%</span>${r3(e.boat_top3_rate)}</td>
+          <td>${dash(e.avg_st)}</td>
+          <td>${e.f_count ? `<span class="best">F${e.f_count}</span>` : 'F0'}${e.l_count ? `<span class="meta">L${e.l_count}</span>` : ''}</td>
           <td>${bar(e.win_probability, maxP)}</td></tr>`).join('')}</tbody></table></div>
-        <p class="note">平均STは直近60走・Fは過去180日の、当サイトの集計です。1着確率はAIの予想です。</p>`,
+        <p class="note">${official ? '勝率・2連対率・3連対率・平均ST・F/Lは公式の値です。' : '平均STは直近60走・Fは過去180日の、当サイトの集計です。'}1着確率はAIの予想です。</p>`
+      },
       // 基本情報：直近1年の総合（3連対率・ST順位・事故・優勝/優出/準優）
       basic: () => `<div class="scroll"><table><thead><tr><th class="l">枠・選手</th><th>勝率<br>(1年)</th><th>2連/3連</th><th>平均ST<br>ST順位</th><th>事故<br>F/L/失</th><th>優勝/優出/準優<br>(1年)</th><th>同<br>(2022〜)</th><th>前づけ</th></tr></thead><tbody>${
         E.map((e) => { const s = e.stats_1y; if (!s) return `<tr><td>${waku(e.lane)} ${esc(e.name)}</td><td colspan="7">―</td></tr>`

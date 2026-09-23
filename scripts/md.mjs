@@ -33,7 +33,9 @@ export function mdToHtml(md) {
     const l = lines[i]
     if (!l.trim()) { i++; continue }
     const h = l.match(/^(#{1,3})\s+(.*)$/)
-    if (h) { const n = Math.min(3, h[1].length + 1); out.push(`<h${n}>${inline(h[2])}</h${n}>`); i++; continue }
+    // ページの題が h1 なので、本文の見出しは h2 から始める。
+    // # も ## も h2、### が h3。h1 のつぎが h3 だと段が飛んで、読み上げにも検索にも良くない。
+    if (h) { const n = Math.min(4, Math.max(2, h[1].length)); out.push(`<h${n}>${inline(h[2])}</h${n}>`); i++; continue }
     if (/^---+\s*$/.test(l)) { out.push('<hr>'); i++; continue }
     if (/^\s*[-*]\s+/.test(l)) {
       const items = []; while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) items.push(lines[i++].replace(/^\s*[-*]\s+/, ''))

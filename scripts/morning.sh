@@ -63,6 +63,13 @@ node scripts/tansho.mjs --date "$TODAY" 2>&1 | tail -3
 echo "--- 9/9 企画枠（SG/G1/G2を自動判別）---"
 node scripts/spot.mjs --date "$TODAY" --auto 2>&1 | tail -4
 
+echo "--- 公式HTML出走表から3連対率・公式の平均ST・F/L を取る ---"
+# 2026-09-23：番組表ファイル（Bファイル）には2連対率までしか入っていない。
+# 3連対率・公式の平均ST・F/L回数は公式サイトのHTML出走表にしかないので、ここで取る。
+# 取った値はBファイルと突き合わせて、合わないレースは保存しない。1レース1.2秒・156レースで約3分。
+node scripts/racelist.mjs 2>&1 | tail -2
+
+echo ""
 echo "--- ニュースの自動生成（前日の結果・今日の開催・グレード開催の予告・予想の結果）---"
 # 2026-09-23：データの事実だけで書く。content/news/ に置く（公開は sync-public.mjs）
 node --max-old-space-size=4096 scripts/news.mjs 2>&1 | tail -1
