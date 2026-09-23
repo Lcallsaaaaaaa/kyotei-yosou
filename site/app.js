@@ -112,7 +112,8 @@
       ${ok ? '' : `<div class="panel" style="margin-top:12px">
         <label for="mem-in"><b>合言葉</b></label>
         <p class="sub">例： nagi-2610-XXXX-XXXX-XXXX（大文字小文字は問いません）</p>
-        <div class="mem-form"><input id="mem-in" type="text" inputmode="latin" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="nagi-　　　-　　　-　　　-　　　"></div>
+        <div class="mem-form"><input id="mem-in" type="password" inputmode="latin" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="nagi-　　　-　　　-　　　-　　　">
+          <button type="button" id="mem-eye" class="eye" aria-pressed="false" aria-label="合言葉を表示する">表示</button></div>
         <p><button type="button" class="cta" id="mem-go">開く</button></p>
         <p id="mem-msg" class="sub"></p>
         ${C.noteUrl ? `<p><a href="${esc(C.noteUrl)}" target="_blank" rel="noopener">まだ会員でない方（noteで月額300円）→</a></p>` : ''}</div>`}
@@ -146,6 +147,16 @@
     }
     go?.addEventListener('click', submit)
     input?.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit() })
+    // 伏字の切り替え。周りから見えないよう、ふだんは隠しておく
+    const eye = document.getElementById('mem-eye')
+    eye?.addEventListener('click', () => {
+      const shown = input.type === 'text'
+      input.type = shown ? 'password' : 'text'
+      eye.textContent = shown ? '表示' : '隠す'
+      eye.setAttribute('aria-pressed', String(!shown))
+      eye.setAttribute('aria-label', shown ? '合言葉を表示する' : '合言葉を隠す')
+      input.focus()
+    })
   }
 
   // ---------- 小道具 ----------
@@ -274,10 +285,33 @@
         <p><a href="/">きょうの出走表</a>　<a href="/tenkai">展開予想</a>　<a href="/venues">場情報・攻略</a>　<a href="/racers">選手</a>　<a href="/news">ニュース</a></p></div>`)
   }
 
+  // ---------- データが止まっていないか ----------
+  // 取り込みが止まっても、画面は古いオッズや直前情報を平気で出してしまう。
+  // 締切間際にそれを見て買われるのがいちばん怖いので、最後の更新からの経過で警告を出す。
+  // レースのある時間帯（8〜21時）は3分ごとに更新されるので、30分止まっていればおかしい。
+  function staleCheck(updatedAt) {
+    const bar = document.getElementById('stale')
+    if (!bar) return
+    if (!updatedAt) { bar.hidden = true; return }
+    const t = new Date(updatedAt.replace(' ', 'T') + ':00+09:00').getTime()
+    if (!Number.isFinite(t)) { bar.hidden = true; return }
+    const min = Math.floor((Date.now() - t) / 60000)
+    const h = Number(nowHM().slice(0, 2))
+    const limit = h >= 8 && h < 21 ? 30 : 180     // レースのある時間帯は30分、夜は3時間
+    if (min < limit) { bar.hidden = true; return }
+    const ago = min < 120 ? `${min}分` : `${Math.floor(min / 60)}時間`
+    bar.hidden = false
+    bar.innerHTML = `<b>データの更新が${esc(ago)}止まっています。</b>
+      オッズ・直前情報・結果が古いままの可能性があります。買う前に
+      <a href="https://www.boatrace.jp/" target="_blank" rel="noopener">公式サイト</a>でお確かめください。
+      <span class="sub">最終更新 ${esc(updatedAt)}</span>`
+  }
+
   async function dayTabs(active, base) {
     const meta = await doc('meta')
     const dates = meta?.dates?.length ? meta.dates : [jstToday()]
     if (meta?.updated_at) document.getElementById('updated').textContent = `データ更新：${meta.updated_at}`
+    staleCheck(meta?.updated_at)
     return `<div class="days">${dates.map((d) => `<a href="/${base}/${d}" class="${d === active ? 'on' : ''}">${md(d)}(${wd(d)})${d === jstToday() ? ' 今日' : ''}</a>`).join('')}</div>`
   }
 

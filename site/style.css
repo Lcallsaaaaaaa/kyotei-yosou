@@ -351,7 +351,7 @@ a { text-underline-offset: .16em; text-decoration-thickness: .08em; }
   font-weight: 900;
   letter-spacing: .035em;
 }
-.brand-sub { font-size: 10px; font-weight: 800; letter-spacing: .05em; color: var(--ink-2); }
+.brand-sub { font-size: 10px; font-weight: 700; letter-spacing: .05em; color: var(--ink-2); }
 .nav { gap: 2px; padding: 2px; }
 .nav a {
   min-height: 40px;
@@ -382,7 +382,7 @@ h3 { font-size: 15px; }
 .panel { padding: 18px; }
 .stat { padding: 14px 16px; }
 .stat b { color: var(--accent-strong); font-size: 25px; }
-.stat span { font-size: 12.5px; font-weight: 600; }
+.stat span { font-size: 12.5px; font-weight: 700; }
 .venue { padding: 15px 16px; }
 .venue-name { font-family: var(--font-brand); font-size: 18px; }
 .venue-series { font-size: 13px; }
@@ -496,7 +496,7 @@ td .meta { font-size: 11.5px; }
 }
 .hero-eyebrow { font-size: 13px; font-weight: 700; letter-spacing: .12em; }
 .hero h1 { max-width: 15em; font-size: clamp(31px, 4vw, 48px); font-weight: 900; letter-spacing: .04em; }
-.hero-lead { max-width: 38em; font-size: 15px; font-weight: 500; }
+.hero-lead { max-width: 38em; font-size: 15px; font-weight: 400; }
 .hero-stats { position: relative; z-index: 1; grid-template-columns: repeat(3, minmax(110px, 1fr)); max-width: 580px; }
 .hero-stats > div { border: 1px solid rgba(255,255,255,.18); border-radius: 14px; backdrop-filter: blur(5px); }
 .hero-stats b { font-size: 27px; }
