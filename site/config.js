@@ -13,7 +13,7 @@ window.NAGI = {
   noteUrl: '',          // 会員（月300円）を売る note のメンバーシップのURL（空なら案内ボタンを出さない）
 
   // ---- 検索とアクセス解析 ----
-  siteName: '凪の予想配信',
+  siteName: 'ボートレース研究所',
   siteUrl: '',          // 例 'https://nagi-kyotei.com'（末尾のスラッシュなし）
                         //   ここを入れると canonical・OGP・sitemap.xml が正しいURLになる。
                         //   空のままだと sitemap が作れず、検索に出るまでが遅くなる。

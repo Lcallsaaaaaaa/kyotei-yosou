@@ -1,4 +1,4 @@
-// 凪の予想配信 データAPI（v1）。Webサイト（デザインはGPTが作る）と、将来のアプリが同じ窓口から読む。
+// ボートレース研究所 データAPI（v1）。Webサイト（デザインはGPTが作る）と、将来のアプリが同じ窓口から読む。
 //
 //   status.mjs が /api/ で始まるURLをここへ回す。一覧は http://localhost:3940/api/v1
 //   仕様書は「API仕様.md」。項目を変えたら必ずそちらも直すこと。
@@ -833,7 +833,7 @@ function venueOf(db, jcd) {
 
 // ---------- 一覧（自己紹介） ----------
 const INDEX = {
-  api: '凪の予想配信 データAPI', version: API_VERSION,
+  api: 'ボートレース研究所 データAPI', version: API_VERSION,
   doc: '競艇予想フォルダの「API仕様.md」',
   note: '時刻はすべて日本時間。date を省くと今日。access=paid の項目はnoteで販売中の買い目なので、公開サイトには出さないこと。',
   endpoints: [

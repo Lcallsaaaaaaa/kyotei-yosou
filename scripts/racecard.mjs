@@ -234,7 +234,7 @@ export function cardPage(dbPath, race) {
   if (!rows.length)
     return head(`${venue}${rno}R出走表`, `<section class="board">
 <header class="board-header"><div class="brand"><span class="brand-accent"></span>
-<h1>凪の予想配信</h1><div class="subheading"><span class="jp">${esc(venue)}${rno}R出走表</span><span>RACE ENTRY DATA</span></div>
+<h1>ボートレース研究所</h1><div class="subheading"><span class="jp">${esc(venue)}${rno}R出走表</span><span>RACE ENTRY DATA</span></div>
 </div></header>
 <div class="board-footer">${esc(date)} の ${esc(venue)}${rno}R は番組表がありません。</div></section>`)
 
@@ -299,10 +299,10 @@ export function cardPage(dbPath, race) {
     `<a href="/card?race=${x.race_id}"${x.race_id === race ? ' class="on"' : ''}>${x.rno}R</a>`).join('')}
 <a href="/tansho?date=${date}">無料予想へ</a><a href="/haishin?date=${date}">配信へ</a></div>`
 
-  return head(`凪の予想配信｜${venue}${rno}R出走表`, `<section class="board" aria-label="凪の予想配信 ${esc(venue)}${rno}R出走表">
+  return head(`ボートレース研究所｜${venue}${rno}R出走表`, `<section class="board" aria-label="ボートレース研究所 ${esc(venue)}${rno}R出走表">
 <header class="board-header">
 <div class="brand"><span class="brand-accent" aria-hidden="true"></span>
-<h1>凪の予想配信</h1>
+<h1>ボートレース研究所</h1>
 <div class="subheading"><span class="jp">${esc(venue)}${rno}R出走表</span><span>RACE ENTRY DATA</span></div></div>
 <div class="header-badge">${badge}</div>
 </header>

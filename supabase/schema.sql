@@ -1,4 +1,4 @@
--- 凪の予想配信：公開サイト用の置き場（Supabase）
+-- ボートレース研究所：公開サイト用の置き場（Supabase）
 -- Supabase の管理画面 → SQL Editor にこれを貼り付けて「Run」する。1回だけでよい。
 --
 -- 中身は docs 表1つだけ。PC（scripts/sync-public.mjs）が「1ページ＝1件」で上書きしていく。

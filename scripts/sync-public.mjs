@@ -180,7 +180,7 @@ async function syncDay(date, withRacers) {
   for (const r of races.races) {
     const j = call(`/api/v1/race?id=${r.race_id}`)
     const d = publicRace(j)
-    r.free_pick = d?.race?.free_pick ? d.race.free_pick.lane : null   // 一覧に「無料」の印を出すため
+    r.free_pick = d?.race?.free_pick ?? null   // トップに「きょうの無料予想」を出すため（選手名・確率・的中まで）
     if (r.free_pick) free.add(r.race_id)
     r.member_only = !!d?.race?.member_only                            // 一覧に「会員」の印を出すため
     docs.push([`race/${r.race_id}`, d])
@@ -309,7 +309,7 @@ function writeSeoFiles() {
 }
 
 async function syncMeta(dates) {
-  await put([['meta', { site: '凪の予想配信', dates, updated_at: jst().toISOString().replace('T', ' ').slice(0, 16) }]])
+  await put([['meta', { site: 'ボートレース研究所', dates, updated_at: jst().toISOString().replace('T', ' ').slice(0, 16) }]])
 }
 
 // ---------- 実行 ----------

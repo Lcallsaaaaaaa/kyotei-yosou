@@ -1,4 +1,4 @@
-// 凪の予想配信 ― 画面の動き
+// ボートレース研究所 ― 画面の動き
 // データは Supabase の docs 表（公開モード）か site/_local/（このPCで試すとき）から読む。形は /api/v1 と同じ。
 // ページ： #/ #/d/日付（出走表）・#/race/ID・#/tenkai/日付・#/results・#/venues・#/venue/場・#/racer/登番
 (() => {
@@ -152,10 +152,11 @@
 
   // ---------- 検索エンジン向けの見出し ----------
   // ページごとに題と説明文を変える。全ページ同じだと検索結果で区別がつかず、順位も上がらない。
-  const SITE = C.siteName || '凪の予想配信'
+  const SITE = C.siteName || 'ボートレース研究所'
   const el = (tag, attrs) => Object.assign(document.createElement(tag), attrs)
   function meta(title, desc, opts = {}) {
-    document.title = title === SITE ? title : `${title}｜${SITE}`
+    // 題の後ろにサイト名を足す。ただし題にすでに入っているときは足さない（二重になる）
+    document.title = title === SITE || title.startsWith(SITE) ? title : `${title}｜${SITE}`
     const put = (sel, make, val, attr = 'content') => {
       let e = document.head.querySelector(sel)
       if (!e) { e = make(); document.head.appendChild(e) }
@@ -269,14 +270,72 @@
     const NI = await doc('news/index')
     const topNews = (NI?.articles ?? []).slice(0, 3)
     const newsBlock = topNews.length ? `<h2>ニュース <a class="sub" href="/news">もっと見る →</a></h2><div class="news-list">${topNews.map(newsItem).join('')}</div>` : ''
-    meta(`${md(date)}(${wd(date)})の出走表 全国${byV.size}場${j.races.length}レース`,
-      `${date.replaceAll('-', '/')}の全国${byV.size}場${j.races.length}レースの出走表。締切時刻・選手の成績・モーター・直前情報と、AIの1着確率をまとめています。`,
+
+    // ---- トップの顔（きょうの日だけ）----
+    const free = j.races.filter((r) => r.free_pick)
+    const RS = isToday ? await doc('results/30') : null
+    const fw = RS?.total?.free_win
+    const hero = isToday ? `<section class="hero">
+      <p class="hero-eyebrow">全国24場・公式データだけで毎日つくっています</p>
+      <h1>${esc(SITE)}</h1>
+      <p class="hero-lead">出走表・直前情報・オッズ・結果をまとめ、AIが出した1着確率を添えています。
+        当たらなかった日も含めて実績を公開しています。</p>
+      <div class="hero-stats">
+        <div><b>${byV.size}</b><span>きょうの開催場</span></div>
+        <div><b>${j.races.length}</b><span>きょうのレース</span></div>
+        <div><b>${free.length}</b><span>無料予想</span></div>
+        ${fw ? `<div><b>${fw.hit_rate}%</b><span>無料予想の的中率<small>直近30日・回収率${fw.return_rate}%</small></span></div>` : ''}
+      </div></section>` : `<h1>出走表 <span class="sub">${md(date)}(${wd(date)})・${byV.size}場 ${j.races.length}レース</span></h1>`
+
+    // ---- 次に締め切るレース ----
+    const nx = nextId ? j.races.find((r) => r.race_id === nextId) : null
+    const mins = nx?.deadline ? (Number(nx.deadline.slice(0, 2)) * 60 + Number(nx.deadline.slice(3, 5))) - (Number(now.slice(0, 2)) * 60 + Number(now.slice(3, 5))) : null
+    const nextBox = nx ? `<a class="next-race" href="/race/${nx.race_id}">
+      <span class="next-label">次の締切</span>
+      <b>${esc(nx.venue ?? VENUES[nx.jcd])} ${nx.race_no}R</b>
+      <span class="next-time">${esc(nx.deadline ?? '')}${mins != null && mins >= 0 && mins < 180 ? `（あと${mins}分）` : ''}</span>
+      <span class="next-go">出走表を見る →</span></a>` : ''
+
+    // ---- きょうの無料予想（単勝1点）----
+    const freeBox = isToday && free.length ? `<h2>きょうの無料予想 <span class="sub">単勝1点・1着確率80%以上の本命だけ</span></h2>
+      <div class="free-list">${free.map((r) => {
+        const f = r.free_pick
+        return `<a class="free-card${r.closed ? ' done' : ''}" href="/race/${r.race_id}">
+          <span class="free-head">${esc(r.venue ?? VENUES[r.jcd])}${r.race_no}R <span class="sub">${esc(r.deadline ?? '')}</span></span>
+          <span class="free-pick">${waku(f.lane)} <b>${esc(f.racer ?? '')}</b></span>
+          <span class="free-p">1着確率 ${pct(f.probability)}</span>
+          ${f.hit == null ? '' : f.hit ? `<span class="hit">的中 ${yen(f.payout)}</span>` : '<span class="miss">不的中</span>'}</a>`
+      }).join('')}</div>
+      <p class="note">買い目は100円換算です。当たらなかったぶんも消さずに<a href="/results">実績</a>に残しています。</p>` : ''
+
+    // ---- できること ----
+    const ENTRY = [
+      ['/tenkai', '展開予想', '全レースの本線・対抗と、逃げ／差し／まくりの確率'],
+      ['/analysis/average', 'データ分析', '全国24場のコース別成績・出目・優勝戦を1年ぶんで集計'],
+      ['/venues', '場情報・攻略', '場ごとの1コースの強さ、波・風・時間帯での変わり方'],
+      ['/racers', '選手データ', '1,600人超の勝率・コース別成績・平均ST・当地の成績'],
+      ['/schedule', '開催予定', 'SG・G1などグレードレースの日程と出場予定選手'],
+      ['/results', '的中実績', '締切前に出した予想だけを、外れた日も含めて集計'],
+    ]
+    const entries = isToday ? `<h2>このサイトでできること</h2>
+      <div class="entry-cards">${ENTRY.map(([href, t, d]) =>
+        `<a href="${href}"><b>${t}</b><span>${d}</span></a>`).join('')}</div>` : ''
+    const memberBox = isToday ? `<div class="panel member-cta">
+      <b>全レースの展開予想とAI予想は会員の方に</b>
+      <p>月額300円。3連複2点プランと、全レースの展開予想がご覧いただけます。</p>
+      <p><a class="cta" href="/member">会員について →</a></p></div>` : ''
+
+    meta(isToday ? `${SITE}｜競艇の出走表・展開予想・データ` : `${md(date)}(${wd(date)})の出走表 全国${byV.size}場${j.races.length}レース`,
+      isToday
+        ? `全国24場の出走表・直前情報・オッズ・結果と、AIの1着確率。場ごとの攻略、選手データ、データ分析も公開。きょうは${byV.size}場${j.races.length}レース、無料予想${free.length}本。`
+        : `${date.replaceAll('-', '/')}の全国${byV.size}場${j.races.length}レースの出走表。締切時刻・選手の成績・モーター・直前情報と、AIの1着確率をまとめています。`,
       { canonical: date === jstToday() ? '/' : `/d/${date}` })
-    // 並びは「レース一覧 → 特集・アラート → 場状況 → ニュース」。スマホでまず出走表に届くように（2026-09-23）
-    view(`<h1>出走表 <span class="sub">${md(date)}(${wd(date)})・${byV.size}場 ${j.races.length}レース</span></h1>${tabs}
-      <div class="grid" style="margin-top:12px">${venues}</div>
-      <p class="note">「無料」の付いたレースは、1着確率80%以上の本命を単勝1点で無料公開しています。橙の枠は次に締め切るレースです。</p>
-      ${feat}${status}${newsBlock}`)
+    // 並びは「顔 → 次の締切 → 無料予想 → レース一覧 → 特集 → 場状況 → ニュース → 入口」
+    view(`${hero}${nextBox}${tabs}${freeBox}
+      <h2>${isToday ? 'きょうのレース' : 'レース一覧'} <span class="sub">${md(date)}(${wd(date)})・${byV.size}場 ${j.races.length}レース</span></h2>
+      <div class="grid">${venues}</div>
+      <p class="note">「無料」は単勝1点を無料公開しているレース、「AI予想」は会員向けの買い目があるレースです。橙の枠は次に締め切るレースです。</p>
+      ${feat}${status}${newsBlock}${entries}${memberBox}`)
   }
 
   // ---------- レース詳細 ----------
