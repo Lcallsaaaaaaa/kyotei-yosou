@@ -35,19 +35,54 @@
   const memberState = () => { try { return JSON.parse(localStorage.getItem(MEM) || 'null') } catch { return null } }
   const periodOfPhrase = (p) => { const m = String(p).trim().match(/^nagi-(\d\d)(\d\d)-/i); return m ? `20${m[1]}-${m[2]}` : null }
   const jaPeriod = (p) => (p ? `${p.slice(0, 4)}年${Number(p.slice(5, 7))}月` : '')
+
+  // ★鍵は「取り出せない形」で置く（2026-09-23の指摘を受けて変更）
+  //   前は鍵そのものを localStorage に文字列で置いていた。これだと、万一このサイトで
+  //   よそのJavaScriptが動いたとき、鍵を読み出して持ち去られる。
+  //   いまは extractable:false の鍵として IndexedDB に入れる。復号には使えるが**中身は取り出せない**。
+  //   （それでも「開いた中身」をその場で持ち去ることは防げない。防げるのは鍵の持ち出し）
+  const IDB = 'nagi', STORE = 'k'
+  const openIdb = () => new Promise((res, rej) => {
+    const r = indexedDB.open(IDB, 1)
+    r.onupgradeneeded = () => r.result.createObjectStore(STORE)
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error)
+  })
+  const idbDo = async (mode, fn) => {
+    const db = await openIdb()
+    return new Promise((res, rej) => {
+      const t = db.transaction(STORE, mode), q = fn(t.objectStore(STORE))
+      q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error)
+    })
+  }
+  let memKey = null   // IndexedDBが使えない端末（プライベートモードなど）はこの回だけ覚える
   async function deriveKey(phrase, period) {
     const e = new TextEncoder()
     const base = await crypto.subtle.importKey('raw', e.encode(phrase.trim()), 'PBKDF2', false, ['deriveBits'])
     const bits = await crypto.subtle.deriveBits(
       { name: 'PBKDF2', salt: e.encode('nagi-paid-v1|' + period), iterations: 210_000, hash: 'SHA-256' }, base, 256)
-    return new Uint8Array(bits)
+    return crypto.subtle.importKey('raw', new Uint8Array(bits), 'AES-GCM', false, ['decrypt'])   // false＝取り出せない
+  }
+  async function saveKey(period, key) {
+    memKey = { period, key }
+    try { await idbDo('readwrite', (s) => s.put({ period, key }, 'member')) } catch { /* 使えない端末はこの回だけ */ }
+    try { localStorage.setItem(MEM, JSON.stringify({ period })) } catch { /* 保存できなくても動く */ }
+  }
+  async function loadKey() {
+    if (memKey) return memKey
+    try { const v = await idbDo('readonly', (s) => s.get('member')); if (v?.key) { memKey = v; return v } } catch { /* 無ければ null */ }
+    return null
+  }
+  async function clearKey() {
+    memKey = null
+    try { await idbDo('readwrite', (s) => s.delete('member')) } catch { /* 無ければそのまま */ }
+    try { localStorage.removeItem(MEM) } catch { /* 同上 */ }
   }
   async function openBox(box) {
-    const st = memberState()
-    if (!st || !box || st.period !== box.period) return null
+    if (!box) return null
+    const k = await loadKey()
+    if (!k || k.period !== box.period) return null
     try {
-      const key = await crypto.subtle.importKey('raw', b64(st.key), 'AES-GCM', false, ['decrypt'])
-      const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64(box.iv) }, key, b64(box.ct))
+      const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64(box.iv) }, k.key, b64(box.ct))
       return JSON.parse(new TextDecoder().decode(plain))
     } catch { return null }
   }
@@ -76,13 +111,13 @@
           ${st ? `<p class="note">いま入っているのは${jaPeriod(st.period)}の合言葉です。今月（${jaPeriod(now)}）ぶんを入れ直してください。</p>` : ''}`}</div>
       ${ok ? '' : `<div class="panel" style="margin-top:12px">
         <label for="mem-in"><b>合言葉</b></label>
-        <p class="sub">例： nagi-2610-XXXX-XXXX（大文字小文字は問いません）</p>
-        <div class="mem-form"><input id="mem-in" type="text" inputmode="latin" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="nagi-　　　-　　　-　　　"></div>
+        <p class="sub">例： nagi-2610-XXXX-XXXX-XXXX（大文字小文字は問いません）</p>
+        <div class="mem-form"><input id="mem-in" type="text" inputmode="latin" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="nagi-　　　-　　　-　　　-　　　"></div>
         <p><button type="button" class="cta" id="mem-go">開く</button></p>
         <p id="mem-msg" class="sub"></p>
         ${C.noteUrl ? `<p><a href="${esc(C.noteUrl)}" target="_blank" rel="noopener">まだ会員でない方（noteで月額300円）→</a></p>` : ''}</div>`}
       <p class="note">合言葉はこの端末の中だけに保存され、外には送られません。お連れの方やSNSへ教えないでください。</p>`)
-    document.getElementById('mem-clear')?.addEventListener('click', () => { localStorage.removeItem(MEM); cache.clear(); route() })
+    document.getElementById('mem-clear')?.addEventListener('click', async () => { await clearKey(); cache.clear(); route() })
     const go = document.getElementById('mem-go'), input = document.getElementById('mem-in'), msg = document.getElementById('mem-msg')
     const submit = async () => {
       const phrase = (input.value || '').trim()
@@ -91,13 +126,18 @@
       msg.textContent = '確かめています…'; go.disabled = true
       try {
         const key = await deriveKey(phrase, period)
-        localStorage.setItem(MEM, JSON.stringify({ period, key: btoa(String.fromCharCode(...key)) }))
+        await saveKey(period, key)
         cache.clear()
         // その月の中身がすでにあれば、本当に開けるかここで確かめる
-        const probe = await doc(`paid/tenkai/${jstToday()}`)
-        if (probe && probe.period === period && !(await openBox(probe))) {
-          localStorage.removeItem(MEM); go.disabled = false
-          msg.textContent = 'この合言葉では開きませんでした。打ちまちがいがないかご確認ください。'
+        // 確認専用の小さな箱で必ず確かめる。これが無い／開けないときは会員として通さない。
+        // 前はその日の有料データで確かめていたので、データがまだ無い日は
+        // 打ちまちがいでも「会員です」と出てしまっていた（2026-09-23の指摘）。
+        const probe = await doc(`paid/check/${period}`)
+        if (!probe || !(await openBox(probe))) {
+          await clearKey(); go.disabled = false
+          msg.textContent = probe
+            ? 'この合言葉では開きませんでした。打ちまちがいがないかご確認ください。'
+            : 'いまこの月の合言葉を確かめられません。少し時間をおいてお試しください。'
           return
         }
         track('member_unlock', { period })   // 合言葉が通った＝会員になった人
@@ -316,11 +356,10 @@
     const fw = RS?.total?.free_win
     const hero = isToday ? `<section class="hero">
       <div class="hero-copy">
-        <div class="hero-brandline"><img class="hero-emblem" src="/assets/hero-analysis-emblem.webp" alt="" width="50" height="50">
-          <p class="hero-eyebrow">凪X演算分析×AI</p></div>
-        <h1>${esc(SITE)}</h1>
-        <p class="hero-lead">全国24場の出走表・直前情報・オッズ・結果を、見やすくひとつに。
-          AIの1着確率と、外れた日も含む実績をそのまま公開しています。</p>
+        <div class="hero-brandline"><p class="hero-eyebrow">凪X演算分析×AI</p></div>
+        <h1><span class="hero-title-boat">ボートレース</span><span class="hero-title-lab">研究所</span></h1>
+        <p class="hero-lead"><span>全国24場の出走表・直前情報・オッズ・結果を、見やすくひとつに。</span>
+          <span>AIの1着確率と、外れた日も含む実績をそのまま公開しています。</span></p>
       </div>
       <div class="hero-stats" aria-label="本日の概要。横にスライドできます" tabindex="0">
         <div><b>${byV.size}</b><span>きょうの開催場</span></div>

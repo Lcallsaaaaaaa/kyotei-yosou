@@ -47,12 +47,16 @@ export function master() {
 /** 日付（YYYY-MM-DD）→ 期間（YYYY-MM）。月替わり。 */
 export const periodOf = (date) => String(date).slice(0, 7)
 
-/** 期間の合言葉。何度呼んでも同じものが出る。 */
+/** 期間の合言葉。何度呼んでも同じものが出る。
+ *  ★12文字＝約60ビット（2026-09-23に8文字＝40ビットから延ばした）。
+ *    暗号文は誰でも取れるので、手元で総当たりされる前提で強さを決める必要がある。
+ *    8文字だと PBKDF2 21万回でも、GPUを並べれば数日で開く計算になる。
+ *    12文字なら現実的な時間では開かない。入力は月1回なので、長くしても手間は変わらない。 */
 export function phraseOf(period, mk = master()) {
   const raw = createHmac('sha256', mk).update('passphrase:' + period).digest()
   let s = ''
-  for (let i = 0; i < 8; i++) s += ABC[raw[i] % 32]
-  return `nagi-${period.slice(2, 4)}${period.slice(5, 7)}-${s.slice(0, 4)}-${s.slice(4)}`
+  for (let i = 0; i < 12; i++) s += ABC[raw[i] % 32]
+  return `nagi-${period.slice(2, 4)}${period.slice(5, 7)}-${s.slice(0, 4)}-${s.slice(4, 8)}-${s.slice(8)}`
 }
 
 /** 合言葉 → 鍵。ブラウザ側（app.js）も同じ計算をする。 */

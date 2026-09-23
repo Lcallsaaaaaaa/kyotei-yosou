@@ -807,3 +807,162 @@ main,
   .hero { min-height: 430px; padding: 25px 18px 190px; }
   .hero::after { width: 185px; height: 195px; }
 }
+
+/* タイトルはロゴ画像ではなく、文字の強弱と余白で見せる */
+.hero-copy {
+  position: relative;
+  z-index: 2;
+  max-width: 610px;
+  margin: -9px 0 4px;
+  padding: 17px 20px 18px;
+  border: 1px solid rgba(143, 205, 216, .48);
+  border-left: 5px solid var(--accent);
+  border-radius: 22px;
+  background: linear-gradient(135deg, rgba(255,255,255,.92), rgba(247,253,254,.7));
+  box-shadow: 0 12px 30px rgba(8, 92, 112, .09), inset 0 1px 0 rgba(255,255,255,.9);
+  backdrop-filter: blur(8px);
+}
+.hero-brandline { display: flex; align-items: center; margin-bottom: 7px; }
+.hero-copy .hero-eyebrow {
+  width: fit-content;
+  margin: 0;
+  padding: 4px 12px;
+  border: 1px solid rgba(8, 127, 156, .19);
+  border-radius: 999px;
+  color: var(--accent-strong);
+  background: rgba(223, 243, 246, .78);
+  font-size: 12px;
+  letter-spacing: .14em;
+}
+.hero-copy h1 {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 .13em;
+  max-width: none;
+  margin: 0 0 11px;
+  color: var(--accent-strong);
+  font-size: clamp(31px, 4vw, 48px);
+  line-height: 1.16;
+  letter-spacing: .025em;
+}
+.hero-title-boat { font-weight: 900; }
+.hero-title-lab {
+  position: relative;
+  color: var(--accent-strong);
+  font-weight: 900;
+  white-space: nowrap;
+}
+.hero-title-lab::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  left: -.04em;
+  right: -.08em;
+  bottom: .05em;
+  height: .3em;
+  border-radius: 99px;
+  background: rgba(92, 204, 214, .22);
+}
+.hero-copy .hero-lead {
+  max-width: 42em;
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.75;
+}
+.hero-copy .hero-lead span { display: block; }
+
+/* 猫・ペンギンは凪の左側に配置 */
+.hero-crew {
+  position: absolute;
+  z-index: 1;
+  left: auto;
+  right: min(26vw, 300px);
+  bottom: -6px;
+  width: min(22vw, 250px);
+  height: min(14vw, 160px);
+  background: url('/assets/hero-mascots-boat.webp') left bottom / contain no-repeat;
+  filter: drop-shadow(0 10px 14px rgba(1, 40, 54, .14));
+  transform-origin: 58% 82%;
+  will-change: transform;
+  animation: hero-boat-ride 7.6s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* キャラクターの背後をゆっくり流れる二層の波 */
+.hero::before {
+  z-index: 0;
+  left: -16%;
+  right: -16%;
+  bottom: -54px;
+  height: 178px;
+  background:
+    radial-gradient(70px 34px at 70px 0, transparent 94%, rgba(8,127,156,.19) 96% 100%, transparent 102%) 0 20px / 140px 70px repeat-x,
+    radial-gradient(92px 41px at 92px 0, transparent 95%, rgba(255,255,255,.82) 97% 100%, transparent 102%) 38px 0 / 184px 84px repeat-x;
+  opacity: .82;
+  pointer-events: none;
+  animation: hero-wave-flow 11s linear infinite, hero-wave-breathe 3.8s ease-in-out infinite alternate;
+}
+.hero::after { z-index: 1; }
+.hero-stats { position: relative; z-index: 2; }
+
+@keyframes hero-wave-flow {
+  from { background-position: 0 20px, 38px 0; }
+  to { background-position: 280px 20px, -330px 0; }
+}
+@keyframes hero-wave-breathe {
+  from { transform: translateY(0); }
+  to { transform: translateY(8px); }
+}
+
+/* 波の3.8秒往復に合わせ、ボートが静かに浮き沈みする */
+@keyframes hero-boat-ride {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(-.6deg); }
+  25% { transform: translate3d(2px, -6px, 0) rotate(.8deg); }
+  50% { transform: translate3d(0, 2px, 0) rotate(-.8deg); }
+  75% { transform: translate3d(-2px, -5px, 0) rotate(.6deg); }
+}
+
+@media (max-width: 719px) {
+  .hero-copy {
+    margin: -7px 0 3px;
+    padding: 14px 15px 16px;
+    border-radius: 18px;
+  }
+  .hero-copy .hero-eyebrow { padding: 4px 9px; font-size: 11.5px; letter-spacing: .08em; }
+  .hero-copy h1 { display: block; margin: 5px 0 9px; font-size: 27px; }
+  .hero-title-boat { margin-right: .13em; }
+  .hero-copy .hero-lead { font-size: 13.5px; line-height: 1.7; }
+  .hero-copy .hero-lead span { display: inline; }
+  .hero-copy .hero-lead span + span::before { content: ' '; }
+  .hero-crew { left: 4px; right: auto; bottom: 2px; width: 182px; height: 112px; }
+  .hero::after { right: -6px; width: 188px; height: 196px; }
+  .hero::before { bottom: -48px; height: 154px; opacity: .76; }
+}
+
+@media (max-width: 390px) {
+  .hero-copy h1 { font-size: 25px; }
+  .hero-crew { left: 0; width: 162px; height: 100px; }
+  .hero::after { width: 170px; height: 180px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero::before { animation: none !important; }
+  .hero-crew { animation: none !important; transform: none !important; }
+}
+
+/* キーボード利用時だけ現れる本文スキップ */
+.skip {
+  position: fixed;
+  z-index: 100;
+  top: -80px;
+  left: 12px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  color: #fff;
+  background: var(--accent-strong);
+}
+.skip:focus { top: 8px; }

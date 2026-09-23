@@ -308,6 +308,13 @@ function writeSeoFiles() {
   return paths.size
 }
 
+// 合言葉が正しいかを確かめるためだけの、中身のない小さな箱。
+// これが無いと、その日の有料データがまだ無いときに「合っているか分からないまま会員として開く」ことになり、
+// 画面が「会員です」と出したのに何も開かない、という食い違いが起きる（2026-09-23の指摘）。
+async function syncPaidCheck(date) {
+  await putPaid([[`paid/check/${periodOf(date)}`, { ok: true, period: periodOf(date) }]], date)
+}
+
 async function syncMeta(dates) {
   await put([['meta', { site: 'ボートレース研究所', dates, updated_at: jst().toISOString().replace('T', ' ').slice(0, 16) }]])
 }
@@ -319,6 +326,7 @@ if (!LIVE) {
   for (const d of dates) log(`${d}: ${await syncDay(d, d === d0)}レース`)
   await syncCommon()
   await syncArticles()
+  await syncPaidCheck(d0)
   await syncMeta(dates.filter((d) => existsSync(join(ROOT, 'data', `predict-${d}.json`)) || d <= d0))
   await removeOld(dates)
   const n = writeSeoFiles()
@@ -341,6 +349,7 @@ for (;;) {
       await syncDay(addDays(d0, 1), false)
       await syncCommon()
       await syncArticles()
+      await syncPaidCheck(d0)
       await syncMeta([addDays(d0, -1), d0, addDays(d0, 1)])
       await removeOld([addDays(d0, -1), d0, addDays(d0, 1)])
       lastFull = jst().getUTCHours() === 7 ? d0 + '-7' : d0
