@@ -19,7 +19,7 @@
         const a = await r.json()
         return a[0]?.body ?? null
       }
-      const r = await fetch('_local/' + key.replace(/\//g, '__') + '.json', { cache: 'no-store' })
+      const r = await fetch('/_local/' + key.replace(/\//g, '__') + '.json', { cache: 'no-store' })
       return r.ok ? r.json() : null
     })()
     cache.set(key, p)
@@ -59,12 +59,13 @@
     return `<div class="panel lock"><b>${esc(what)}は会員の方だけご覧いただけます</b>
       <p>${stale ? `お手持ちの合言葉は${jaPeriod(st.period)}のものです。${jaPeriod(date.slice(0, 7))}の合言葉を入れてください。`
         : '月額300円の会員になると、全レースの展開予想とAI予想（3連複2点プラン）がご覧いただけます。'}</p>
-      <p><a class="cta" href="#/member">合言葉を入れる</a>${C.noteUrl ? ` <a class="cta ghost" href="${esc(C.noteUrl)}" target="_blank" rel="noopener">会員になる（月300円）</a>` : ''}</p></div>`
+      <p><a class="cta" href="/member">合言葉を入れる</a>${C.noteUrl ? ` <a class="cta ghost" href="${esc(C.noteUrl)}" target="_blank" rel="noopener">会員になる（月300円）</a>` : ''}</p></div>`
   }
   async function memberPage() {
     setNav('member')
     const st = memberState()
     const now = jstToday().slice(0, 7)
+    meta('会員（月額300円）', '月額300円の会員になると、全レースの展開予想とAI予想（3連複2点プラン）がご覧いただけます。')
     const ok = st && st.period === now
     view(`<h1>会員</h1>
       <div class="panel">${ok ? `<p><b>${jaPeriod(st.period)}の会員として開いています。</b></p>
@@ -99,7 +100,8 @@
           msg.textContent = 'この合言葉では開きませんでした。打ちまちがいがないかご確認ください。'
           return
         }
-        location.hash = '#/tenkai'
+        track('member_unlock', { period })   // 合言葉が通った＝会員になった人
+        navTo('/tenkai')
       } catch (e) { go.disabled = false; msg.textContent = '開けませんでした（' + (e.message || e) + '）' }
     }
     go?.addEventListener('click', submit)
@@ -124,13 +126,50 @@
     const m = document.getElementById('more'); if (m) { m.hidden = true; document.querySelector('.more-btn')?.setAttribute('aria-expanded', 'false') }
   }
   const view = (html) => { app.innerHTML = html; window.scrollTo(0, 0) }
+
+  // ---------- アクセス解析（GA4）----------
+  // config.js の gaId を入れたときだけ読み込む。URLが変わるたびに1ページとして数える
+  // （画面の中だけでページが変わる作りなので、そうしないと最初の1ページしか数えられない）。
+  if (C.gaId) {
+    document.head.appendChild(Object.assign(document.createElement('script'),
+      { async: true, src: `https://www.googletagmanager.com/gtag/js?id=${C.gaId}` }))
+    window.dataLayer = window.dataLayer || []
+    window.gtag = function () { window.dataLayer.push(arguments) }
+    window.gtag('js', new Date())
+    window.gtag('config', C.gaId, { send_page_view: false })
+  }
+  const track = (name, params) => { if (window.gtag) window.gtag('event', name, params) }
+  const trackPage = () => track('page_view', { page_title: document.title, page_location: location.href, page_path: location.pathname })
+
+  // ---------- 検索エンジン向けの見出し ----------
+  // ページごとに題と説明文を変える。全ページ同じだと検索結果で区別がつかず、順位も上がらない。
+  const SITE = C.siteName || '凪の予想配信'
+  const el = (tag, attrs) => Object.assign(document.createElement(tag), attrs)
+  function meta(title, desc, opts = {}) {
+    document.title = title === SITE ? title : `${title}｜${SITE}`
+    const put = (sel, make, val, attr = 'content') => {
+      let e = document.head.querySelector(sel)
+      if (!e) { e = make(); document.head.appendChild(e) }
+      e.setAttribute(attr, val)
+    }
+    const url = (C.siteUrl || location.origin) + location.pathname
+    put('meta[name="description"]', () => el('meta', { name: 'description' }), desc)
+    put('link[rel="canonical"]', () => el('link', { rel: 'canonical' }), url, 'href')
+    for (const [p, v] of [['og:title', document.title], ['og:description', desc], ['og:url', url],
+      ['og:type', opts.article ? 'article' : 'website'], ['og:site_name', SITE]])
+      put(`meta[property="${p}"]`, () => { const m = el('meta'); m.setAttribute('property', p); return m }, v)
+    put('meta[name="twitter:card"]', () => el('meta', { name: 'twitter:card' }), 'summary')
+    let s = document.getElementById('ld')
+    if (!s) { s = el('script', { type: 'application/ld+json', id: 'ld' }); document.head.appendChild(s) }
+    s.textContent = JSON.stringify(opts.ld ?? { '@context': 'https://schema.org', '@type': 'WebPage', name: document.title, description: desc, url })
+  }
   const fail = (e) => view(`<p class="empty">${esc(e.message || e)}</p>`)
 
   async function dayTabs(active, base) {
     const meta = await doc('meta')
     const dates = meta?.dates?.length ? meta.dates : [jstToday()]
     if (meta?.updated_at) document.getElementById('updated').textContent = `データ更新：${meta.updated_at}`
-    return `<div class="days">${dates.map((d) => `<a href="#/${base}/${d}" class="${d === active ? 'on' : ''}">${md(d)}(${wd(d)})${d === jstToday() ? ' 今日' : ''}</a>`).join('')}</div>`
+    return `<div class="days">${dates.map((d) => `<a href="/${base}/${d}" class="${d === active ? 'on' : ''}">${md(d)}(${wd(d)})${d === jstToday() ? ' 今日' : ''}</a>`).join('')}</div>`
   }
 
   // ---------- 出走表（トップ） ----------
@@ -168,15 +207,15 @@
       const chips = rs.sort((a, b) => a.race_no - b.race_no).map((r) => {
         const c = ['rc', r.closed || r.cancelled ? 'done' : '', r.race_id === nextId ? 'next' : '', r.free_pick ? 'free' : ''].join(' ')
         const sub = r.cancelled ? '中止' : r.result?.order ? esc(r.result.order) : esc(r.deadline ?? '')
-        return `<a class="${c}" href="#/race/${r.race_id}"><b>${r.race_no}R</b><small>${sub}</small></a>`
+        return `<a class="${c}" href="/race/${r.race_id}"><b>${r.race_no}R</b><small>${sub}</small></a>`
       }).join('')
-      return `<section class="venue"><div class="venue-head"><a class="venue-name" href="#/venue/${jcd}" style="color:inherit;text-decoration:none">${VENUES[jcd]}</a>
+      return `<section class="venue"><div class="venue-head"><a class="venue-name" href="/venue/${jcd}" style="color:inherit;text-decoration:none">${VENUES[jcd]}</a>
         ${g}<span class="venue-series">${esc(r0.series ?? '')}${r0.day_no ? `　${r0.day_no}日目${r0.series_days ? '/' + r0.series_days : ''}` : ''}</span></div>
         <div class="races">${chips}</div></section>`
     }).join('')
     // ガチガチ／穴レース・アラート（日和のトップにある特集）
     const F = await doc(`features/${date}`)
-    const rlink = (x) => `<a href="#/race/${x.race_id}">${esc(x.venue)}${x.race_no}R</a> <span class="sub">${esc(x.deadline ?? '')}</span>`
+    const rlink = (x) => `<a href="/race/${x.race_id}">${esc(x.venue)}${x.race_no}R</a> <span class="sub">${esc(x.deadline ?? '')}</span>`
     const pick = (list, fn, n = 8) => list.filter((x) => !x.closed).slice(0, n).map(fn).join('') || '<li><span class="sub">該当なし（締切前のレース）</span></li>'
     const feat = F ? `<div class="grid two" style="margin-top:12px">
         <div class="panel"><b>ガチガチレース</b> <span class="sub">${esc(F.gachigachi.rule)}</span><ol class="rank">${pick(F.gachigachi.races, (x) =>
@@ -197,7 +236,9 @@
       </div>` : ''
     const NI = await doc('news/index')
     const topNews = (NI?.articles ?? []).slice(0, 3)
-    const newsBlock = topNews.length ? `<h2>ニュース <a class="sub" href="#/news">もっと見る →</a></h2><div class="news-list">${topNews.map(newsItem).join('')}</div>` : ''
+    const newsBlock = topNews.length ? `<h2>ニュース <a class="sub" href="/news">もっと見る →</a></h2><div class="news-list">${topNews.map(newsItem).join('')}</div>` : ''
+    meta(`${md(date)}(${wd(date)})の出走表 全国${byV.size}場${j.races.length}レース`,
+      `${date.replaceAll('-', '/')}の全国${byV.size}場${j.races.length}レースの出走表です。締切時刻・選手の成績・モーター・直前情報と、AIが出した1着確率をレースごとにまとめています。`)
     // 並びは「レース一覧 → 特集・アラート → 場状況 → ニュース」。スマホでまず出走表に届くように（2026-09-23）
     view(`<h1>出走表 <span class="sub">${md(date)}(${wd(date)})・${byV.size}場 ${j.races.length}レース</span></h1>${tabs}
       <div class="grid" style="margin-top:12px">${venues}</div>
@@ -216,6 +257,12 @@
     const c = R.conditions
     const conds = c ? `<div class="conds"><span>${esc(c.weather ?? '―')}</span><span>気温 ${dash(c.air_temp, 1)}℃</span><span>水温 ${dash(c.water_temp, 1)}℃</span>
       <span>風 ${dash(c.wind_speed, 0)}m</span><span>波 ${dash(c.wave, 0)}cm</span><span class="sub">${esc(c.before_info)}・${esc(c.fetched_at ?? '')}</span></div>` : ''
+    meta(`${R.venue}${R.race_no}R ${md(R.date)} 出走表と予想`,
+      `${R.venue}${R.race_no}R（${R.date.replaceAll('-', '/')}・締切${R.deadline ?? '―'}）の出走表。${(R.entries ?? []).map((e) => e.name).join('・')}。勝率・モーター2連対率・平均ST・直前情報と、AIの1着確率を載せています。`,
+      { ld: { '@context': 'https://schema.org', '@type': 'SportsEvent', name: `${R.venue}${R.race_no}R`,
+        startDate: R.deadline ? `${R.date}T${R.deadline}:00+09:00` : R.date, sport: '競艇',
+        location: { '@type': 'Place', name: `ボートレース${R.venue}` },
+        competitor: (R.entries ?? []).map((e) => ({ '@type': 'Person', name: e.name })) } })
     const state = R.cancelled ? '<span class="badge gray">中止・順延</span>' : R.result ? '<span class="badge gray">確定</span>' : R.closed ? '<span class="badge gray">締切</span>' : ''
     const free = R.free_pick ? `<div class="panel freepick"><b>無料予想</b>　単勝 ${waku(R.free_pick.lane)} ${esc(R.free_pick.racer ?? '')}（1着確率 ${pct(R.free_pick.probability)}）
       ${R.free_pick.hit == null ? '' : R.free_pick.hit ? `<span class="hit">的中 ${yen(R.free_pick.payout)}</span>` : '<span class="miss">不的中</span>'}</div>` : ''
@@ -227,13 +274,13 @@
         <small>${pct(x.probability)}</small>${x.hit == null ? '' : x.hit ? `<b class="hit">的中 ${yen(x.payout)}</b>` : '<b class="miss">不的中</b>'}</span>`).join('')}</div>
       <p class="note">1点100円・2点で200円。回収率は100%未満です。</p></div>` : ''
     const cta = R.has_member_picks && !p2
-      ? `<a class="cta" href="#/member">このレースのAI予想（3連複2点）を見る（会員・月300円）</a>` : ''
+      ? `<a class="cta" href="/member">このレースのAI予想（3連複2点）を見る（会員・月300円）</a>` : ''
     const E = R.entries ?? []
     const maxP = Math.max(...E.map((e) => e.win_probability ?? 0), 1)
 
     const T = {
       card: () => `<div class="scroll"><table><thead><tr><th class="l">枠・選手</th><th>全国<br>勝率/2連</th><th>当地<br>勝率/2連</th><th>モーター<br>No/2連</th><th>ボート<br>No/2連</th><th>平均ST</th><th>F</th><th>1着確率</th></tr></thead><tbody>${
-        E.map((e) => `<tr><td>${waku(e.lane)} <a class="name" href="#/racer/${e.racer_id}">${esc(e.name)}</a> ${cls(e.class)}
+        E.map((e) => `<tr><td>${waku(e.lane)} <a class="name" href="/racer/${e.racer_id}">${esc(e.name)}</a> ${cls(e.class)}
           <span class="meta">${esc(e.branch ?? '')} ${e.age ?? ''}歳 ${e.weight ?? ''}kg</span></td>
           <td>${dash(e.win_rate_national)}<span class="meta">${dash(e.top2_rate_national, 1)}%</span></td>
           <td>${dash(e.win_rate_local)}<span class="meta">${dash(e.top2_rate_local, 1)}%</span></td>
@@ -246,7 +293,7 @@
       basic: () => `<div class="scroll"><table><thead><tr><th class="l">枠・選手</th><th>勝率<br>(1年)</th><th>2連/3連</th><th>平均ST<br>ST順位</th><th>事故<br>F/L/失</th><th>優勝/優出/準優<br>(1年)</th><th>同<br>(2022〜)</th><th>前づけ</th></tr></thead><tbody>${
         E.map((e) => { const s = e.stats_1y; if (!s) return `<tr><td>${waku(e.lane)} ${esc(e.name)}</td><td colspan="7">―</td></tr>`
           const a = s.accidents, t = s.titles_since_2022
-          return `<tr><td>${waku(e.lane)} <a class="name" href="#/racer/${e.racer_id}">${esc(e.name)}</a><span class="meta">${s.starts}走</span></td>
+          return `<tr><td>${waku(e.lane)} <a class="name" href="/racer/${e.racer_id}">${esc(e.name)}</a><span class="meta">${s.starts}走</span></td>
             <td>${pct(s.win_rate)}</td><td>${pct(s.top2_rate)}<span class="meta">${pct(s.top3_rate)}</span></td>
             <td>${dash(s.avg_st)}<span class="meta">${dash(s.avg_st_rank)}位</span></td>
             <td class="${a.flying + a.late + a.disqualified ? 'best' : ''}">${a.flying}/${a.late}/${a.disqualified}<span class="meta">${pct(s.accident_rate)}</span></td>
@@ -259,7 +306,7 @@
           const how = c.course === 1
             ? `逃げ${pct(c.escape_rate)}・差され${pct(c.lost_to['差され'])}・まくられ${pct(c.lost_to['まくられ'])}・まくり差され${pct(c.lost_to['まくり差され'])}`
             : c.wins_by_kimarite.slice(0, 3).map((k) => `${esc(k.kimarite)}${pct(k.rate)}`).join('・') || '1着なし'
-          return `<tr><td>${waku(e.lane)} <a class="name" href="#/racer/${e.racer_id}">${esc(e.name)}</a></td><td>${c.course}${c.course !== e.lane ? ' <span class="badge warn">進入変更</span>' : ''}</td>
+          return `<tr><td>${waku(e.lane)} <a class="name" href="/racer/${e.racer_id}">${esc(e.name)}</a></td><td>${c.course}${c.course !== e.lane ? ' <span class="badge warn">進入変更</span>' : ''}</td>
             <td>${c.starts}</td><td>${pct(c.win_rate)}</td><td>${pct(c.top2_rate)}<span class="meta">${pct(c.top3_rate)}</span></td>
             <td>${dash(c.avg_st)}<span class="meta">${dash(c.avg_st_rank)}位</span></td><td class="l">${how}</td></tr>` }).join('')}</tbody></table></div>
         <p class="note">直近1年・そのコースに入ったときだけの成績。コースは展示の進入（無ければ枠）。</p>`,
@@ -276,7 +323,7 @@
       // 今節成績
       konsetsu: () => `<div class="scroll"><table><thead><tr><th class="l">枠・選手</th><th class="l">今節の着順</th><th>2連率</th><th>平均ST</th><th class="l">前日までの内訳（日・R・枠→コース・ST・着）</th></tr></thead><tbody>${
         E.map((e) => { const k = e.konsetsu
-          return `<tr><td>${waku(e.lane)} <a class="name" href="#/racer/${e.racer_id}">${esc(e.name)}</a></td>
+          return `<tr><td>${waku(e.lane)} <a class="name" href="/racer/${e.racer_id}">${esc(e.name)}</a></td>
             <td class="l"><b>${esc(k?.series_result ?? '―')}</b></td><td>${pct(k?.top2_rate)}</td><td>${dash(k?.avg_st)}</td>
             <td class="l">${(k?.races ?? []).map((x) => `${md(x.date)} ${x.race_no}R ${x.lane}→${x.course ?? '―'} ${x.st == null ? '' : (x.st_flag === 'F' ? 'F' : '') + Number(x.st).toFixed(2)} <b>${esc(x.rank)}</b>`).join('<br>') || '―'}</td></tr>` }).join('')}</tbody></table></div>
         <p class="note">今節の着順は番組表の値（当日の結果は含まない）。内訳は前日までの出走。</p>`,
@@ -347,11 +394,11 @@
     tab = TABS.some(([k]) => k === tab) ? tab : (R.result ? 'result' : 'card')
     view(`<div class="race-head"><h1>${esc(R.venue)} ${R.race_no}R</h1><span class="sub">${md(R.date)}(${wd(R.date)}) 締切 ${esc(R.deadline ?? '―')}</span>${state}</div>
       <div class="sub">${esc(R.title ?? '')}　${esc(R.series ?? '')}${R.day_no ? `　${R.day_no}日目` : ''}</div>${conds}
-      <nav class="rnav" aria-label="同じ場のレース">${same.map((r) => `<a href="#/race/${r.race_id}/${tab}" class="${r.race_id === id ? 'on' : ''}">${r.race_no}R</a>`).join('')}</nav>
+      <nav class="rnav" aria-label="同じ場のレース">${same.map((r) => `<a href="/race/${r.race_id}/${tab}" class="${r.race_id === id ? 'on' : ''}">${r.race_no}R</a>`).join('')}</nav>
       ${free}${aiPick}${!R.closed ? cta : ''}
       <div class="tabs" role="tablist">${TABS.map(([k, n]) => `<button role="tab" aria-selected="${k === tab}" data-tab="${k}">${n}</button>`).join('')}</div>
       <div id="tab">${T[tab]()}</div>`)
-    app.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { location.hash = `#/race/${id}/${b.dataset.tab}` }))
+    app.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => navTo(`/race/${id}/${b.dataset.tab}`)))
   }
 
   // ---------- 展開予想の一覧 ----------
@@ -359,6 +406,8 @@
     setNav('tenkai')
     date = date || jstToday()
     const tabs = await dayTabs(date, 'tenkai')
+    meta(`${md(date)}の展開予想`,
+      `${date.replaceAll('-', '/')}の全レースの展開予想。本線・対抗と、逃げ／差し／まくりの決まり手の確率を、直近1年の実測から出しています。`)
     const j = await doc(`tenkai/${date}`)
     if (!j || j.status !== 'ok') return view(`<h1>展開予想</h1>${tabs}<p class="empty">${md(date)} の展開予想はまだありません。</p>`)
     // 会員ぶん。合言葉があれば全レース、無ければ無料枠のレースだけになる
@@ -371,9 +420,9 @@
       ${locked ? lockPanel(`${locked}レースの展開予想`, date) : ''}
       <div class="scroll"><table><thead><tr><th class="l">レース</th><th class="l">展開</th><th class="l">本線</th><th class="l">対抗</th><th class="l">決まり手</th></tr></thead><tbody>${
       rows.map((r) => { const t = r.tenkai
-        if (!t) return `<tr style="opacity:.5"><td class="l"><a href="#/race/${r.race_id}/tenkai">${esc(r.venue)}${r.race_no}R</a><span class="meta">${esc(r.deadline ?? '')}</span></td>
-          <td class="l" colspan="4"><a href="#/member">会員の方だけご覧いただけます →</a></td></tr>`
-        return `<tr style="${r.closed ? 'opacity:.55' : ''}"><td class="l"><a href="#/race/${r.race_id}/tenkai">${esc(r.venue)}${r.race_no}R</a><span class="meta">${esc(r.deadline ?? '')}</span></td>
+        if (!t) return `<tr style="opacity:.5"><td class="l"><a href="/race/${r.race_id}/tenkai">${esc(r.venue)}${r.race_no}R</a><span class="meta">${esc(r.deadline ?? '')}</span></td>
+          <td class="l" colspan="4"><a href="/member">会員の方だけご覧いただけます →</a></td></tr>`
+        return `<tr style="${r.closed ? 'opacity:.55' : ''}"><td class="l"><a href="/race/${r.race_id}/tenkai">${esc(r.venue)}${r.race_no}R</a><span class="meta">${esc(r.deadline ?? '')}</span></td>
           <td class="l">${esc(t.shape)}</td>
           <td class="l">${waku(t.honmei.lane)} ${esc(t.honmei.likely_move ?? '')} ${pct(t.honmei.win_probability)}</td>
           <td class="l">${t.taiko ? `${waku(t.taiko.lane)} ${esc(t.taiko.likely_move ?? '')} ${pct(t.taiko.win_probability)}` : '―'}</td>
@@ -384,6 +433,7 @@
   async function results() {
     setNav('results')
     const j = await doc('results/30')
+    meta('的中実績', '過去30日の的中率と回収率です。締切前に出した予想だけを、外れた日も含めて集計しています。')
     if (!j) return view('<p class="empty">実績はまだありません。</p>')
     const P = j.products, T = j.total
     const cards = Object.keys(P).filter((k) => T[k]).map((k) => `<div class="stat"><span>${esc(P[k])}</span><b>${pct(T[k].hit_rate)}</b>
@@ -398,14 +448,17 @@
 
   // ---------- 場 ----------
   async function venues() {
-    setNav('venues')
+    meta('ボートレース場一覧', '全国24か所のボートレース場の特徴・コース別成績・攻略の要点をまとめています。')
+        setNav('venues')
     view(`<h1>場情報</h1><div class="races" style="grid-template-columns:repeat(auto-fill,minmax(88px,1fr))">${
-      VENUES.slice(1).map((v, i) => `<a class="rc" href="#/venue/${i + 1}"><b>${v}</b><small>${String(i + 1).padStart(2, '0')}</small></a>`).join('')}</div>`)
+      VENUES.slice(1).map((v, i) => `<a class="rc" href="/venue/${i + 1}"><b>${v}</b><small>${String(i + 1).padStart(2, '0')}</small></a>`).join('')}</div>`)
   }
   async function venue(jcd) {
     setNav('venues')
     const [j, G] = await Promise.all([doc(`venue/${jcd}`), doc(`guide/${jcd}`)])
     const V = j?.venue
+    meta(`ボートレース${V.venue}の攻略とデータ`,
+      `ボートレース${V.venue}の1コース1着率・コース別の決まり手・波や風での変わり方・当地で強い選手を、直近1年の実測からまとめた攻略ページです。`)
     if (!V) return view('<p class="empty">この場のデータはまだありません。</p>')
     const kmBars = (list, key = 'share') => list.map((k) => `<span>${esc(k.kimarite ?? k.label)}</span><i style="width:${Math.max(2, k[key])}%"></i><span class="num">${pct(k[key])}</span>`).join('')
     const cond = V.course1_by_condition ?? {}
@@ -416,7 +469,7 @@
         <div class="stat"><span>万舟率</span><b>${pct(V.trifecta.over_10000_rate)}</b></div></div>
       ${G?.points?.length ? `<h2>攻略の要点</h2><div class="panel guide"><ul>${G.points.map((p) => `<li>${esc(p)}</li>`).join('')}</ul><p class="note">${esc(G.points_note)}</p></div>` : ''}
       ${G?.manual ? `<h2>${esc(G.manual.title)}</h2><div class="panel article-body">${G.manual.html}</div>${G.manual.updated ? `<p class="note">更新：${esc(G.manual.updated)}</p>` : ''}` : ''}
-      ${G?.related_news?.length ? `<h2>${esc(V.venue)}のニュース</h2><div class="news-list">${G.related_news.map((n) => `<a class="news-item" href="#/news/${esc(n.slug)}"><span class="news-date">${n.date ? md(n.date) : ''}</span><b>${esc(n.title)}</b></a>`).join('')}</div>` : ''}
+      ${G?.related_news?.length ? `<h2>${esc(V.venue)}のニュース</h2><div class="news-list">${G.related_news.map((n) => `<a class="news-item" href="/news/${esc(n.slug)}"><span class="news-date">${n.date ? md(n.date) : ''}</span><b>${esc(n.title)}</b></a>`).join('')}</div>` : ''}
       <h2>コース別</h2><div class="scroll"><table><thead><tr><th class="l">コース</th><th>1着率</th><th>2連対率</th><th>3連対率</th><th>出走</th></tr></thead><tbody>${
         V.by_course.map((c) => `<tr><td class="l">${waku(c.course)}</td><td>${bar(c.win_rate, V.by_course[0].win_rate)}</td><td>${pct(c.top2_rate)}</td><td>${pct(c.top3_rate)}</td><td>${c.starts.toLocaleString()}</td></tr>`).join('')}</tbody></table></div>
       <h2>1コースの1着率が条件でどう変わるか</h2><div class="grid two">${condBlock('時間帯', cond.time)}${condBlock('波の高さ', cond.wave)}${condBlock('風の強さ', cond.wind)}${condBlock('グレード', cond.grade)}</div>
@@ -425,7 +478,7 @@
       <h2>1コースの強さ（レース番号別）</h2><div class="panel km">${V.course1_win_rate_by_race_no.map((k) => `<span>${k.race_no}R</span><i style="width:${Math.max(2, k.win_rate)}%"></i><span class="num">${pct(k.win_rate)}</span>`).join('')}</div>
       <h2>決まり手（全体）</h2><div class="panel km">${kmBars(V.kimarite)}</div>
       ${V.local_top?.length ? `<h2>当地で強い選手</h2><div class="scroll"><table><thead><tr><th class="l">選手</th><th>出走</th><th>1着率</th><th>2連対率</th></tr></thead><tbody>${
-        V.local_top.map((r) => `<tr><td class="l"><a class="name" href="#/racer/${r.racer_id}">${esc(r.name)}</a> ${cls(r.class)}</td><td>${r.starts}</td><td>${pct(r.win_rate)}</td><td>${pct(r.top2_rate)}</td></tr>`).join('')}</tbody></table></div><p class="note">${esc(V.local_top_note)}</p>` : ''}`)
+        V.local_top.map((r) => `<tr><td class="l"><a class="name" href="/racer/${r.racer_id}">${esc(r.name)}</a> ${cls(r.class)}</td><td>${r.starts}</td><td>${pct(r.win_rate)}</td><td>${pct(r.top2_rate)}</td></tr>`).join('')}</tbody></table></div><p class="note">${esc(V.local_top_note)}</p>` : ''}`)
   }
 
   // ---------- 選手 ----------
@@ -435,12 +488,16 @@
     setNav('racers')
     const j = await doc(`racer/${id}`)
     const P = j?.racer
+    meta(`${P.name}（${P.racer_id}）の成績データ`,
+      `競艇選手 ${P.name}（登番${P.racer_id}・${P.branch ?? ''}・${P.class ?? ''}）の勝率・コース別成績・平均ST・場別の成績・直近の出走をまとめています。`,
+      { ld: { '@context': 'https://schema.org', '@type': 'Person', name: P.name, identifier: String(P.racer_id),
+        jobTitle: '競艇選手', affiliation: P.branch ?? undefined } })
     if (!P) return view('<p class="empty">この選手のデータはまだありません（直近180日に出走した選手を掲載しています）。</p>')
     const S = P.summary_1y, A = S.accidents, T2 = P.titles_since_2022
     const c1 = P.by_course.find((c) => c.course === 1)
     view(`<h1>${esc(P.name)} ${cls(P.class)}</h1><div class="sub">${esc(P.kana ?? '')}　登番${P.racer_id}　${esc(P.branch ?? '')}支部　${P.age ?? ''}歳　${P.height ?? ''}cm/${P.weight ?? ''}kg　${esc(P.blood ?? '')}型</div>
-      ${P.upcoming?.length ? `<div class="panel" style="margin-top:12px"><b>出場予定</b>${P.upcoming.map((m) => `<div><a href="#/meeting/${m.jcd}/${m.start_date}">${md(m.start_date)}〜${md(m.end_date)} ${esc(m.venue)}</a> ${gradeBadge(m.grade)} <span class="sub">${esc(m.title)}</span></div>`).join('')}</div>` : ''}
-      ${P.today?.length ? `<div class="panel freepick" style="margin-top:12px"><b>本日の出走</b>　${P.today.map((t) => `<a href="#/race/${t.race_id}">${esc(t.venue)}${t.race_no}R（${t.lane}号艇）</a>`).join('　')}</div>` : ''}
+      ${P.upcoming?.length ? `<div class="panel" style="margin-top:12px"><b>出場予定</b>${P.upcoming.map((m) => `<div><a href="/meeting/${m.jcd}/${m.start_date}">${md(m.start_date)}〜${md(m.end_date)} ${esc(m.venue)}</a> ${gradeBadge(m.grade)} <span class="sub">${esc(m.title)}</span></div>`).join('')}</div>` : ''}
+      ${P.today?.length ? `<div class="panel freepick" style="margin-top:12px"><b>本日の出走</b>　${P.today.map((t) => `<a href="/race/${t.race_id}">${esc(t.venue)}${t.race_no}R（${t.lane}号艇）</a>`).join('　')}</div>` : ''}
       <div class="stats" style="margin-top:12px">
         <div class="stat"><span>勝率（${esc(P.period ?? '')}期）</span><b>${dash(P.official.win_rate)}</b></div>
         <div class="stat"><span>2連対率（同）</span><b>${pct(P.official.top2_rate)}</b></div>
@@ -458,7 +515,7 @@
       <h2>コース別の勝ち方</h2><div class="scroll"><table><thead><tr><th class="l">コース</th><th class="l">決まり手（そのコースの出走に対する割合）</th><th class="l">直近5走（着）</th></tr></thead><tbody>${
         P.by_course.map((c) => `<tr><td class="l">${waku(c.course)}</td><td class="l">${c.wins_by_kimarite.map((k) => `${esc(k.kimarite)} ${k.count}回（${pct(k.rate)}）`).join('・') || '1着なし'}</td>
           <td class="l">${c.recent.map((x) => `<b>${esc(x.rank)}</b>`).join(' ')}</td></tr>`).join('')}</tbody></table></div>
-      <h2>場別（直近1年）</h2><div class="scroll"><table>${statHead('場')}<tbody>${P.by_venue.map((v) => statRow(`<a href="#/venue/${v.jcd}">${esc(v.venue)}</a>`, v)).join('')}</tbody></table></div>
+      <h2>場別（直近1年）</h2><div class="scroll"><table>${statHead('場')}<tbody>${P.by_venue.map((v) => statRow(`<a href="/venue/${v.jcd}">${esc(v.venue)}</a>`, v)).join('')}</tbody></table></div>
       <div class="grid two"><div><h2>グレード別</h2><div class="scroll"><table>${statHead('グレード')}<tbody>${P.by_grade.map((g) => statRow(esc(g.grade), g)).join('')}</tbody></table></div></div>
         <div><h2>時間帯別</h2><div class="scroll"><table>${statHead('時間帯')}<tbody>${P.by_time.map((g) => statRow(esc(g.band), g)).join('')}${P.by_wave.map((g) => statRow(esc(g.band), g)).join('')}</tbody></table></div></div></div>
       <h2>進入</h2><div class="stats"><div class="stat"><span>前づけ（枠より内へ）</span><b>${pct(P.maezuke.inward_rate)}</b><span>${P.maezuke.inward}回/${P.maezuke.starts}走</span></div>
@@ -478,12 +535,13 @@
   async function racers(q) {
     setNav('racers')
     const j = await doc('racers')
+    meta('競艇選手一覧', '直近180日に出走した競艇選手の一覧です。名前や登番から、勝率・コース別成績・平均STを調べられます。')
     if (!j) return view('<p class="empty">選手一覧はまだありません。</p>')
     const all = j.racers
     const draw = (s) => {
       const k = s.trim()
       const hit = k ? all.filter((r) => (r.name ?? '').includes(k) || (r.kana ?? '').includes(k) || String(r.racer_id).startsWith(k) || (r.branch ?? '').includes(k)) : all
-      document.getElementById('rl').innerHTML = hit.slice(0, 300).map((r) => `<tr><td class="l"><a class="name" href="#/racer/${r.racer_id}">${esc(r.name)}</a> ${cls(r.class)}<span class="meta">${esc(r.kana ?? '')}</span></td>
+      document.getElementById('rl').innerHTML = hit.slice(0, 300).map((r) => `<tr><td class="l"><a class="name" href="/racer/${r.racer_id}">${esc(r.name)}</a> ${cls(r.class)}<span class="meta">${esc(r.kana ?? '')}</span></td>
         <td>${r.racer_id}</td><td class="l">${esc(r.branch ?? '')}</td><td>${r.age ?? '―'}</td><td>${dash(r.win_rate)}</td><td>${pct(r.top2_rate)}</td></tr>`).join('')
       document.getElementById('rc').textContent = `${hit.length}人${hit.length > 300 ? '（上位300人を表示）' : ''}`
     }
@@ -502,11 +560,12 @@
   async function schedule() {
     setNav('schedule')
     const j = await doc('schedule')
+    meta('ボートレース開催予定', '全国24場の開催予定と、SG・G1・G2・G3のグレードレースの日程・出場予定選手をまとめています。')
     if (!j?.meetings?.length) return view('<h1>開催予定</h1><p class="empty">開催予定はまだありません。</p>')
     const big = j.meetings.filter((m) => ['SG', 'G1', 'G2', 'G3'].includes(m.grade))
     const row = (m) => `<tr><td class="l">${md(m.start_date)}〜${md(m.end_date)}<span class="meta">${m.days}日間</span></td>
-      <td class="l"><a href="#/venue/${m.jcd}">${esc(m.venue)}</a></td><td class="l">${gradeBadge(m.grade)}</td>
-      <td class="l" style="white-space:normal"><a href="#/meeting/${m.jcd}/${m.start_date}">${esc(m.title)}</a></td><td>${m.racers ? m.racers + '人' : '―'}</td></tr>`
+      <td class="l"><a href="/venue/${m.jcd}">${esc(m.venue)}</a></td><td class="l">${gradeBadge(m.grade)}</td>
+      <td class="l" style="white-space:normal"><a href="/meeting/${m.jcd}/${m.start_date}">${esc(m.title)}</a></td><td>${m.racers ? m.racers + '人' : '―'}</td></tr>`
     view(`<h1>開催予定 <span class="sub">${md(j.from)}〜${md(j.to)}・${j.meetings.length}開催</span></h1>
       ${big.length ? `<h2>グレードレース</h2><div class="scroll"><table><tbody>${big.map(row).join('')}</tbody></table></div>` : ''}
       <h2>すべての開催</h2><div class="scroll"><table><thead><tr><th class="l">期間</th><th class="l">場</th><th class="l">グレード</th><th class="l">開催名</th><th>出場予定</th></tr></thead><tbody>${j.meetings.map(row).join('')}</tbody></table></div>
@@ -516,11 +575,13 @@
     setNav('schedule')
     const j = await doc(`meeting/${jcd}/${start}`)
     const M = j?.meeting
+    meta(`${M.venue} ${M.title ?? ''}の出場選手`,
+      `${M.venue}で${(M.start_date ?? '').replaceAll('-', '/')}から行われる${M.title ?? '開催'}（${M.grade ?? '一般'}）の日程と出場予定選手です。`)
     if (!M) return view('<p class="empty">この開催のデータはまだありません。</p>')
     view(`<h1>${esc(M.venue)} ${gradeBadge(M.grade)}</h1><div class="sub">${esc(M.title)}　${md(M.start_date)}〜${md(M.end_date)}（${M.days}日間）</div>
       <h2>出場予定選手 <span class="sub">${M.racers.length}人・勝率順</span></h2>
       <div class="scroll"><table><thead><tr><th class="l">選手</th><th>登番</th><th class="l">支部</th><th>勝率</th></tr></thead><tbody>${
-        M.racers.map((r) => `<tr><td class="l"><a class="name" href="#/racer/${r.racer_id}">${esc(r.name)}</a> ${cls(r.class)}</td><td>${r.racer_id}</td><td class="l">${esc(r.branch ?? '')}</td><td>${dash(r.win_rate)}</td></tr>`).join('')}</tbody></table></div>
+        M.racers.map((r) => `<tr><td class="l"><a class="name" href="/racer/${r.racer_id}">${esc(r.name)}</a> ${cls(r.class)}</td><td>${r.racer_id}</td><td class="l">${esc(r.branch ?? '')}</td><td>${dash(r.win_rate)}</td></tr>`).join('')}</tbody></table></div>
       <p class="note">公式のあっせん情報から。欠場・追加あっせんで変わることがあります。</p>`)
   }
 
@@ -529,6 +590,8 @@
     setNav('analysis')
     const KINDS = [['average', 'コース別平均'], ['ranking', 'コース別ランキング'], ['demoku', '出目分析'], ['yusho', '優勝戦']]
     kind = KINDS.some(([k]) => k === kind) ? kind : 'average'
+    meta(`${KINDS.find(([k]) => k === kind)[1]}｜競艇データ分析`,
+      `競艇の${KINDS.find(([k]) => k === kind)[1]}。全国24場の直近1年の実測データから集計しています。`)
     const j = await doc(`analysis/${kind}`)
     const tabs = `<div class="tabs" role="tablist">${KINDS.map(([k, n]) => `<button role="tab" aria-selected="${k === kind}" data-k="${k}">${n}</button>`).join('')}</div>`
     let body = '<p class="empty">データがありません。</p>'
@@ -537,14 +600,14 @@
         cs.map((c) => `<tr><td class="l">${waku(c.course)}</td><td>${bar(c.win_rate, 60)}</td><td>${pct(c.top2_rate)}</td><td>${pct(c.top3_rate)}</td><td>${dash(c.avg_st)}</td>
           <td class="l">${c.kimarite.slice(0, 3).map((k) => `${esc(k.kimarite)}${pct(k.share)}`).join('・')}</td></tr>`).join('')}</tbody></table></div>`
       body = `<p class="note">直近1年（${esc(j.period.from)}〜）</p><h2>全国</h2>${tbl(j.national)}
-        <h2>場ごと</h2><div class="grid two">${j.venues.map((v) => `<div><h2 style="margin-top:6px"><a href="#/venue/${v.jcd}">${esc(v.venue)}</a></h2>${tbl(v.courses)}</div>`).join('')}</div>`
+        <h2>場ごと</h2><div class="grid two">${j.venues.map((v) => `<div><h2 style="margin-top:6px"><a href="/venue/${v.jcd}">${esc(v.venue)}</a></h2>${tbl(v.courses)}</div>`).join('')}</div>`
     }
     if (j && kind === 'ranking') {
       body = `<p class="note">${esc(j.rule)}</p>${j.by_course.map((c) => `<h2>${waku(c.course)} コースの1着率</h2><div class="scroll"><table><thead><tr><th class="l">順位</th><th class="l">選手</th><th>出走</th><th>1着率</th><th>2連/3連</th><th>平均ST</th></tr></thead><tbody>${
-        c.top.slice(0, 15).map((r, i) => `<tr><td class="l">${i + 1}</td><td class="l"><a class="name" href="#/racer/${r.racer_id}">${esc(r.name)}</a> ${cls(r.class)}<span class="meta">${esc(r.branch ?? '')}</span></td>
+        c.top.slice(0, 15).map((r, i) => `<tr><td class="l">${i + 1}</td><td class="l"><a class="name" href="/racer/${r.racer_id}">${esc(r.name)}</a> ${cls(r.class)}<span class="meta">${esc(r.branch ?? '')}</span></td>
           <td>${r.starts}</td><td>${pct(r.win_rate)}</td><td>${pct(r.top2_rate)}<span class="meta">${pct(r.top3_rate)}</span></td><td>${dash(r.avg_st)}</td></tr>`).join('')}</tbody></table></div>`).join('')}
         <h2>スタートが速い選手</h2><div class="scroll"><table><thead><tr><th class="l">順位</th><th class="l">選手</th><th>出走</th><th>平均ST</th></tr></thead><tbody>${
-          j.fastest_start.slice(0, 20).map((r, i) => `<tr><td class="l">${i + 1}</td><td class="l"><a class="name" href="#/racer/${r.racer_id}">${esc(r.name)}</a> ${cls(r.class)}</td><td>${r.starts}</td><td>${dash(r.avg_st)}</td></tr>`).join('')}</tbody></table></div>`
+          j.fastest_start.slice(0, 20).map((r, i) => `<tr><td class="l">${i + 1}</td><td class="l"><a class="name" href="/racer/${r.racer_id}">${esc(r.name)}</a> ${cls(r.class)}</td><td>${r.starts}</td><td>${dash(r.avg_st)}</td></tr>`).join('')}</tbody></table></div>`
     }
     if (j && kind === 'demoku') {
       const blk = (d) => `<div class="stats"><div class="stat"><span>レース</span><b>${d.races.toLocaleString()}</b></div><div class="stat"><span>3連単の平均配当</span><b>${yen(d.avg_payout)}</b></div>
@@ -559,12 +622,12 @@
     if (j && kind === 'yusho') {
       const tbl = (rs) => `<div class="scroll"><table><thead><tr><th class="l">日付</th><th class="l">場・開催</th><th class="l">優勝</th><th class="l">着順</th><th class="l">決まり手</th><th>3連単</th></tr></thead><tbody>${
         rs.map((r) => `<tr><td class="l">${md(r.date)}</td><td class="l">${esc(r.venue)} ${gradeBadge(r.grade)}<span class="meta">${esc(r.series ?? '')}</span></td>
-          <td class="l">${r.winner ? `${waku(r.winner.lane)} <a class="name" href="#/racer/${r.winner.racer_id}">${esc(r.winner.name)}</a>` : '―'}</td>
+          <td class="l">${r.winner ? `${waku(r.winner.lane)} <a class="name" href="/racer/${r.winner.racer_id}">${esc(r.winner.name)}</a>` : '―'}</td>
           <td class="l">${esc(r.order)}</td><td class="l">${esc(r.kimarite ?? '')}</td><td>${yen(r.trifecta_payout)}</td></tr>`).join('')}</tbody></table></div>`
       body = `${j.big.length ? `<h2>SG・G1・G2</h2>${tbl(j.big)}` : ''}<h2>すべての優勝戦 <span class="sub">${esc(j.period)}</span></h2>${tbl(j.races)}`
     }
     view(`<h1>データ分析</h1>${tabs}${body}`)
-    app.querySelectorAll('[data-k]').forEach((b) => b.addEventListener('click', () => { location.hash = `#/analysis/${b.dataset.k}` }))
+    app.querySelectorAll('[data-k]').forEach((b) => b.addEventListener('click', () => navTo(`/analysis/${b.dataset.k}`)))
     const dv = document.getElementById('dv')
     if (dv) dv.addEventListener('change', () => {
       const d = j.venues[Number(dv.value)]
@@ -575,32 +638,58 @@
   }
 
   // ---------- ニュース ----------
-  const newsItem = (n) => `<a class="news-item" href="#/news/${esc(n.slug)}"><span class="news-date">${n.date ? md(n.date) : ''}</span>
+  const newsItem = (n) => `<a class="news-item" href="/news/${esc(n.slug)}"><span class="news-date">${n.date ? md(n.date) : ''}</span>
     <b>${esc(n.title)}</b>${n.summary ? `<span class="news-sum">${esc(n.summary.slice(0, 70))}…</span>` : ''}</a>`
   async function newsList(tag) {
     setNav('news')
     const j = await doc('news/index')
+    meta(tag ? `${tag}のニュース` : '競艇ニュース',
+      tag ? `${tag}に関する競艇のニュース・データのまとめです。` : '前日の優勝戦・高配当ランキング・今日の開催・グレードレースの予告など、競艇のニュースをデータからまとめています。')
     const all = j?.articles ?? []
     const tags = [...new Set(all.flatMap((n) => n.tags ?? []))].slice(0, 12)
     const list = tag ? all.filter((n) => (n.tags ?? []).includes(tag)) : all
     view(`<h1>ニュース</h1>
-      ${tags.length ? `<div class="chips"><a href="#/news" class="${tag ? '' : 'on'}">すべて</a>${tags.map((t) => `<a href="#/news/tag/${encodeURIComponent(t)}" class="${t === tag ? 'on' : ''}">${esc(t)}</a>`).join('')}</div>` : ''}
+      ${tags.length ? `<div class="chips"><a href="/news" class="${tag ? '' : 'on'}">すべて</a>${tags.map((t) => `<a href="/news/tag/${encodeURIComponent(t)}" class="${t === tag ? 'on' : ''}">${esc(t)}</a>`).join('')}</div>` : ''}
       <div class="news-list">${list.map(newsItem).join('') || '<p class="empty">記事はまだありません。</p>'}</div>`)
   }
   async function article(slug) {
     setNav('news')
     const a = await doc(`news/${slug}`)
+    meta(a.title, (a.summary ?? a.title).slice(0, 110),
+      { article: true, ld: { '@context': 'https://schema.org', '@type': 'NewsArticle', headline: a.title,
+        datePublished: a.date ?? undefined, dateModified: a.date ?? undefined,
+        publisher: { '@type': 'Organization', name: SITE } } })
     if (!a) return view('<p class="empty">この記事は見つかりません。</p>')
-    view(`<article class="article"><div class="sub">${a.date ? md(a.date) : ''}${(a.tags ?? []).map((t) => ` <a class="badge" href="#/news/tag/${encodeURIComponent(t)}">${esc(t)}</a>`).join('')}</div>
+    view(`<article class="article"><div class="sub">${a.date ? md(a.date) : ''}${(a.tags ?? []).map((t) => ` <a class="badge" href="/news/tag/${encodeURIComponent(t)}">${esc(t)}</a>`).join('')}</div>
       <h1>${esc(a.title)}</h1><div class="article-body">${a.html}</div>
-      ${a.venue ? `<p><a href="#/venue/${a.venue}">${VENUES[a.venue]}の攻略ページへ →</a></p>` : ''}
+      ${a.venue ? `<p><a href="/venue/${a.venue}">${VENUES[a.venue]}の攻略ページへ →</a></p>` : ''}
       <p class="note">予想は的中を約束するものではありません。舟券の購入は20歳からです。</p>
-      <p><a href="#/news">← ニュース一覧へ</a></p></article>`)
+      <p><a href="/news">← ニュース一覧へ</a></p></article>`)
   }
 
   // ---------- 振り分け ----------
+  // URL は実際のパス（/race/… ）。ハッシュ（#/race/… ）だと検索エンジンから見て1ページしか無いことになり、
+  // どのページも検索に出てこない。古い #/ のURLは実URLへ送る。
+  function navTo(path, replace) {
+    if (location.pathname + location.search === path) return
+    history[replace ? 'replaceState' : 'pushState'](null, '', path)
+    route()
+  }
+  document.addEventListener('click', (e) => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+    const a = e.target.closest?.('a')
+    const href = a?.getAttribute('href')
+    if (!href) return
+    if (C.noteUrl && href === C.noteUrl) track('member_click', { page_path: location.pathname })   // 申し込みへ進んだ数
+    if (href === '/member') track('member_page', { page_path: location.pathname })
+    if (!href.startsWith('/') || a.target === '_blank') return
+    e.preventDefault(); navTo(href)
+  })
+  window.addEventListener('popstate', route)
+
   async function route() {
-    const p = location.hash.replace(/^#\/?/, '').split('/')
+    if (location.hash.startsWith('#/')) return navTo(location.hash.slice(1), true)
+    const p = location.pathname.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean)
     try {
       if (!p[0]) return await home()
       if (p[0] === 'd') return await home(p[1])
@@ -620,11 +709,12 @@
       if (p[0] === 'member') return await memberPage()
       return await home()
     } catch (e) { fail(e) }
+    finally { trackPage() }
   }
   document.querySelector('.more-btn')?.addEventListener('click', (e) => {
     const m = document.getElementById('more'); m.hidden = !m.hidden
     e.currentTarget.setAttribute('aria-expanded', String(!m.hidden))
   })
-  window.addEventListener('hashchange', route)
+  window.addEventListener('hashchange', route)   // 古い #/ のURLで来た人を実URLへ送るため
   route()
 })()

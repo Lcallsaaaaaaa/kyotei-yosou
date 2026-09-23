@@ -88,10 +88,12 @@ async function put(docs) {
   }
   await putRaw(docs)
 }
+const allKeys = new Set()   // sitemap.xml を作るため、この回に出したもの全部（送信をはぶいたぶんも含む）
 async function putRaw(docs) {
   const todo = []
   for (const [key, body] of docs) {
     if (!body) continue
+    allKeys.add(key)
     const h = hash(body)
     if (!LOCAL && state[key] === h) { skipped++; continue }
     todo.push({ key, body, h })
@@ -255,7 +257,7 @@ async function syncArticles() {
   const docs = [['news/index', { articles: news.slice(0, 200).map((n) => ({ slug: n.slug, title: n.meta.title, date: n.meta.date ?? null,
     tags: n.meta.tags, venue: n.meta.venue, summary: n.summary })) }]]
   for (const n of news.slice(0, 200)) docs.push([`news/${n.slug}`, { slug: n.slug, title: n.meta.title, date: n.meta.date ?? null, tags: n.meta.tags,
-    venue: n.meta.venue, html: n.html }])
+    venue: n.meta.venue, summary: n.summary, html: n.html }])
   const manual = new Map(loadDir(join(ROOT, 'content', 'venues')).map((m) => [Number(m.slug), m]))
   const avg = call('/api/v1/analysis?kind=average'), dem = call('/api/v1/analysis?kind=demoku')
   for (let j = 1; j <= 24; j++) {
@@ -263,6 +265,43 @@ async function syncArticles() {
     if (v) docs.push([`guide/${j}`, venueGuide(j, v, avg, dem, manual.get(j), news)])
   }
   await put(docs)
+}
+
+// ---------- 検索エンジン向け（sitemap.xml と robots.txt）----------
+// 置き場（Supabase）ではなく、画面のフォルダ（site/）に置く。デプロイでそのまま上がる。
+// URL は実際のパス。以前はハッシュ（#/…）だったので、検索エンジンからは1ページにしか見えなかった。
+function siteConfig() {
+  try {
+    const win = {}
+    new Function('window', readFileSync(join(ROOT, 'site', 'config.js'), 'utf8'))(win)
+    return win.NAGI ?? {}
+  } catch { return {} }
+}
+function writeSeoFiles() {
+  const cfg = siteConfig()
+  const base = (cfg.siteUrl || '').replace(/\/+$/, '')
+  const paths = new Set(['/', '/tenkai', '/news', '/venues', '/racers', '/schedule', '/results', '/member'])
+  for (const k of allKeys) {
+    if (k.startsWith('paid/')) continue
+    const [kind, ...rest] = k.split('/')
+    if (kind === 'race' || kind === 'racer' || kind === 'venue' || kind === 'analysis') paths.add(`/${kind}/${rest.join('/')}`)
+    else if (kind === 'meeting') paths.add(`/meeting/${rest.join('/')}`)
+    else if (kind === 'news' && rest[0] && rest[0] !== 'index') paths.add(`/news/${rest[0]}`)
+  }
+  const day = today()
+  const dir = join(ROOT, 'site')
+  if (!base) {
+    writeFileSync(join(dir, 'robots.txt'), 'User-agent: *\nDisallow: /\n')   // URLが決まるまでは検索に出さない
+    console.log('  ⚠ site/config.js の siteUrl が空なので sitemap.xml を作れません（robots.txt は「見に来ないで」のまま）')
+    return 0
+  }
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  writeFileSync(join(dir, 'sitemap.xml'),
+    `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
+    [...paths].sort().map((p) => `  <url><loc>${esc(base + p)}</loc><lastmod>${day}</lastmod></url>`).join('\n') +
+    `\n</urlset>\n`)
+  writeFileSync(join(dir, 'robots.txt'), `User-agent: *\nAllow: /\n\nSitemap: ${base}/sitemap.xml\n`)
+  return paths.size
 }
 
 async function syncMeta(dates) {
@@ -278,6 +317,8 @@ if (!LIVE) {
   await syncArticles()
   await syncMeta(dates.filter((d) => existsSync(join(ROOT, 'data', `predict-${d}.json`)) || d <= d0))
   await removeOld(dates)
+  const n = writeSeoFiles()
+  if (n) log(`sitemap.xml に ${n} ページ`)
   log(`${LOCAL ? '書き出し' : '送信'} ${sent}件・変化なしで省略 ${skipped}件（${((Date.now() - t0) / 1000).toFixed(0)}秒）${LOCAL ? '　→ ' + OUT : ''}`)
   process.exit(0)
 }
@@ -299,6 +340,8 @@ for (;;) {
       await syncMeta([addDays(d0, -1), d0, addDays(d0, 1)])
       await removeOld([addDays(d0, -1), d0, addDays(d0, 1)])
       lastFull = jst().getUTCHours() === 7 ? d0 + '-7' : d0
+      const n = writeSeoFiles()
+      if (n) log(`sitemap.xml に ${n} ページ（site/ を置き直すと反映されます）`)
     }
     if (sent > before) log(`送信 ${sent - before}件`)
   } catch (e) { log('失敗:', e.message) }
