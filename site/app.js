@@ -329,12 +329,16 @@
     const F = await doc(`features/${date}`)
     const rlink = (x) => `<a href="/race/${x.race_id}">${esc(x.venue)}${x.race_no}R</a> <span class="sub">${esc(x.deadline ?? '')}</span>`
     const pick = (list, fn, n = 8) => list.filter((x) => !x.closed).slice(0, n).map(fn).join('') || '<li><span class="sub">該当なし（締切前のレース）</span></li>'
-    const feat = F ? `<div class="grid two" style="margin-top:12px">
-        <div class="panel"><b>ガチガチレース</b> <span class="sub">${esc(F.gachigachi.rule)}</span><ol class="rank">${pick(F.gachigachi.races, (x) =>
+    // 注目レース（ガチガチ・穴）は「AIの本命の1着確率」そのものなので会員限定（2026-09-23）。
+    // アラートは展示タイムやチルトから作っていて1着予想ではないので、無料のまま。
+    const fp = F?.member_only ? await paidDoc(`paid/features/${date}`) : null
+    const G = fp?.gachigachi ?? F?.gachigachi, A = fp?.ana ?? F?.ana
+    const feat = F ? `${G && A ? `<div class="grid two" style="margin-top:12px">
+        <div class="panel"><b>ガチガチレース</b> <span class="sub">${esc(G.rule)}</span><ol class="rank">${pick(G.races, (x) =>
           `<li><span>${rlink(x)}</span><span class="num">${waku(x.favorite.lane)} ${pct(x.favorite.win_probability)}</span></li>`)}</ol></div>
-        <div class="panel"><b>穴レース</b> <span class="sub">${esc(F.ana.rule)}</span><ol class="rank">${pick(F.ana.races, (x) =>
+        <div class="panel"><b>穴レース</b> <span class="sub">${esc(A.rule)}</span><ol class="rank">${pick(A.races, (x) =>
           `<li><span>${rlink(x)}</span><span class="num">本命${waku(x.favorite.lane)} ${pct(x.favorite.win_probability)}</span></li>`)}</ol></div>
-      </div>
+      </div>` : F.member_only ? lockPanel('注目レース（ガチガチ・穴）', date) : ''}
       <h2>アラート <span class="sub">当日の直前情報から</span></h2>
       <div class="grid two">
         <div class="panel"><b>まくりアラート</b> <span class="sub">${esc(F.alerts.rules.makuri)}</span><ol class="rank">${pick(F.alerts.makuri, (x) =>
@@ -443,7 +447,7 @@
     const free = R.free_pick ? `<div class="panel freepick"><b>無料予想</b>　単勝 ${waku(R.free_pick.lane)} ${esc(R.free_pick.racer ?? '')}（1着確率 ${pct(R.free_pick.probability)}）
       ${R.free_pick.hit == null ? '' : R.free_pick.hit ? `<span class="hit">的中 ${yen(R.free_pick.payout)}</span>` : '<span class="miss">不的中</span>'}</div>` : ''
     // 会員ぶん（展開予想・AI予想）。合言葉が入っていなければ開かないので null になる
-    const paid = (R.member_only || R.has_member_picks) ? await paidDoc(`paid/race/${id}`) : null
+    const paid = (R.member_only || R.has_member_picks || R.has_member_probs) ? await paidDoc(`paid/race/${id}`) : null
     const p2 = paid?.picks?.plan2
     const aiPick = p2 ? `<div class="panel aipick"><b>AI予想　${esc(p2.name)}</b><span class="badge">自信度 ${p2.confidence}</span>
       <div class="picks">${p2.picks.map((x) => `<span class="combo">${x.combo.split('=').map((l) => waku(l)).join('')}
@@ -452,6 +456,10 @@
     const cta = R.has_member_picks && !p2
       ? `<a class="cta" href="/member">このレースのAI予想（3連複2点）を見る（会員・月300円）</a>` : ''
     const E = R.entries ?? []
+    // 1着確率は会員限定（2026-09-23）。合言葉があれば会員ぶんから戻して出走表に出す。
+    const probOf = new Map((paid?.probs ?? []).map((p) => [p.lane, p]))
+    for (const e of E) { const p = probOf.get(e.lane); if (p) { e.win_probability = p.win_probability; e.top2_probability = p.top2_probability } }
+    const hasProb = E.some((e) => e.win_probability != null)
     const maxP = Math.max(...E.map((e) => e.win_probability ?? 0), 1)
 
     const T = {
@@ -473,8 +481,10 @@
           <td>${e.boat_no ?? '―'}<span class="meta">${dash(e.boat_top2_rate, 1)}%</span>${r3(e.boat_top3_rate)}</td>
           <td>${dash(e.avg_st)}</td>
           <td>${e.f_count ? `<span class="best">F${e.f_count}</span>` : 'F0'}${e.l_count ? `<span class="meta">L${e.l_count}</span>` : ''}</td>
-          <td>${bar(e.win_probability, maxP)}</td></tr>`).join('')}</tbody></table></div>
-        <p class="note">${official ? '勝率・2連対率・3連対率・平均ST・F/Lは公式の値です。' : '平均STは直近60走・Fは過去180日の、当サイトの集計です。'}1着確率はAIの予想です。</p>`
+          <td>${hasProb ? bar(e.win_probability, maxP) : '<a class="needmem" href="/member">会員</a>'}</td></tr>`).join('')}</tbody></table></div>
+        <p class="note">${official ? '勝率・2連対率・3連対率・平均ST・F/Lは公式の値です。' : '平均STは直近60走・Fは過去180日の、当サイトの集計です。'}${
+          hasProb ? '1着確率はAIの予想です。' : '1着確率（AIの予想）は会員の方だけご覧いただけます。'}</p>
+        ${hasProb || !R.has_member_probs ? '' : lockPanel('1着確率', R.date)}`
       },
       // 基本情報：直近1年の総合（3連対率・ST順位・事故・優勝/優出/準優）
       basic: () => `<div class="scroll"><table><thead><tr><th class="l">枠・選手</th><th>勝率<br>(1年)</th><th>2連/3連</th><th>平均ST<br>ST順位</th><th>事故<br>F/L/失</th><th>優勝/優出/準優<br>(1年)</th><th>同<br>(2022〜)</th><th>前づけ</th></tr></thead><tbody>${
@@ -598,9 +608,10 @@
               return `<tr><td class="l">${waku(w.lane)} <span class="name">${esc(nameOf.get(w.lane) ?? '')}</span></td>
                 <td><b class="oval ${heat(w.odds)}">${od(w.odds)}</b></td>
                 <td>${p ? od(p.low) + (p.high ? '〜' + od(p.high) : '') : '―'}</td>
-                <td>${pct(prob.get(w.lane))}</td></tr>`
+                <td>${prob.get(w.lane) != null ? pct(prob.get(w.lane)) : '<a class="needmem" href="/member">会員</a>'}</td></tr>`
             }).join('')}</tbody></table></div>
-          <p class="note">単勝オッズは「どれだけ買われているか」、AIの1着確率は「データから見た強さ」です。別のものなので、そのまま並べています。${o.win_taken ? `　単勝・複勝：${esc(o.win_taken)}` : ''}</p>` : ''
+          <p class="note">単勝オッズは「どれだけ買われているか」、AIの1着確率は「データから見た強さ」です。別のものなので、そのまま並べています。${
+            hasProb ? '' : 'AIの1着確率は会員の方だけご覧いただけます。'}${o.win_taken ? `　単勝・複勝：${esc(o.win_taken)}` : ''}</p>` : ''
 
         return `<p class="note">${esc(o.kind)}のオッズ${o.taken_at ? `（${esc(o.taken_at)}・締切${o.minutes_before}分前）` : ''}。${esc(o.note ?? '')}</p>
           <div class="odds-legend"><span class="sub">オッズの目安</span>

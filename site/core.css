@@ -201,3 +201,8 @@
   .hero-copy h1 { font-size: 25px; }
 }
 
+
+/* 会員限定の数字のかわりに出す小さなリンク（1着確率など） */
+.needmem { display: inline-block; font-size: 11px; font-weight: 700; text-decoration: none;
+  color: var(--accent); background: var(--accent-soft); border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
+.needmem:hover { text-decoration: underline; }

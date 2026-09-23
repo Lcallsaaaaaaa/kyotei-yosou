@@ -54,18 +54,24 @@ function publicRace(j) {
   const { prediction, picks, tenkai, ...race } = j.race
   const free = picks?.free_win ? { lane: picks.free_win.lane, racer: picks.free_win.racer,
     probability: picks.free_win.probability, hit: picks.free_win.hit, payout: picks.free_win.payout } : null
+  // ★1着確率は会員限定（2026-09-23）。出走表からは外し、会員ぶんへ回す。
+  //   無料枠（単勝1点）の確率だけは、無料で見せる1本ぶんなので残す。
+  const entries = (race.entries ?? []).map(({ win_probability, top2_probability, ...e }) => e)
   // 無料枠（単勝1点）のレースだけは、展開予想も入口として無料で見せる
   return { api_version: j.api_version, prediction_generated_at: j.prediction_generated_at,
-    race: { ...race, free_pick: free, tenkai: free ? tenkai : null,
-      member_only: !free && !!tenkai, has_member_picks: !!(picks?.plan2 || picks?.haishin) } }
+    race: { ...race, entries, free_pick: free, tenkai: free ? tenkai : null,
+      member_only: !free && !!tenkai, has_member_picks: !!(picks?.plan2 || picks?.haishin),
+      has_member_probs: (race.entries ?? []).some((e) => e.win_probability != null) } }
 }
 // 会員（月300円）に見せるぶん。これは必ず seal() で閉じてから送る。
 function memberRace(j) {
   if (!j?.race) return null
-  const { prediction, picks, tenkai } = j.race
-  if (!tenkai && !picks?.plan2 && !picks?.haishin) return null
+  const { prediction, picks, tenkai, entries } = j.race
+  const probs = (entries ?? []).filter((e) => e.win_probability != null)
+    .map((e) => ({ lane: e.lane, win_probability: e.win_probability, top2_probability: e.top2_probability ?? null }))
+  if (!tenkai && !probs.length && !picks?.plan2 && !picks?.haishin) return null
   const { free_win, spot, ...paidPicks } = picks ?? {}
-  return { race_id: j.race.race_id, tenkai: tenkai ?? null,
+  return { race_id: j.race.race_id, tenkai: tenkai ?? null, probs: probs.length ? probs : null,
     picks: Object.keys(paidPicks).length ? paidPicks : null, prediction: prediction ?? null }
 }
 function assertNoPaid(key, obj) {
@@ -74,6 +80,13 @@ function assertNoPaid(key, obj) {
   //   （実績の集計 results の plan2・b2 などは的中率の数字だけで買い目ではないので対象外。買い目は必ず配列で入る）
   for (const bad of ['"prediction":', '"picks":', '"trio":[', '"trifecta":[', '"exacta":['])
     if (s.includes(bad)) throw new Error(`${key} に有料の項目 ${bad} が入っている。送らずに止める`)
+  // 1着確率も会員限定（2026-09-23）。ただし例外が2つある：
+  //   ・無料枠（単勝1点）の free_pick.probability … 1日十数本だけ無料で見せているもの
+  //   ・無料枠のレースの展開予想（tenkai）の中の win_probability … 入口として無料で見せているもの
+  if (s.includes('"win_probability"') && !key.startsWith('tenkai/') && !key.startsWith('race/'))
+    throw new Error(`${key} に1着確率が入っている。送らずに止める`)
+  if (key.startsWith('race/') && obj?.race?.entries?.some((e) => e.win_probability != null))
+    throw new Error(`${key} の出走表に1着確率が残っている。送らずに止める`)
 }
 
 // ---------- 送る（または書き出す） ----------
@@ -183,6 +196,7 @@ async function syncDay(date, withRacers) {
     r.free_pick = d?.race?.free_pick ?? null   // トップに「きょうの無料予想」を出すため（選手名・確率・的中まで）
     if (r.free_pick) free.add(r.race_id)
     r.member_only = !!d?.race?.member_only                            // 一覧に「会員」の印を出すため
+    delete r.favorite                                                 // 本命と1着確率は会員限定（2026-09-23）
     docs.push([`race/${r.race_id}`, d])
     const m = memberRace(j)
     if (m) paid.push([`paid/race/${r.race_id}`, m])
@@ -193,7 +207,18 @@ async function syncDay(date, withRacers) {
     paid.push([`paid/tenkai/${date}`, { date, races: tk.races }])
     tk.races = tk.races.map((r) => (free.has(r.race_id) ? r : { ...r, tenkai: null, member_only: !!r.tenkai }))
   }
-  docs.unshift([`races/${date}`, races], [`tenkai/${date}`, tk], [`features/${date}`, call(`/api/v1/features?date=${date}`)])
+  // 注目レース（ガチガチ・穴）は「AIの本命の1着確率」そのものなので会員限定にする。
+  // アラート（まくり・前づけ・チルト・スタート）は展示タイムやチルトから作っていて
+  // 1着予想ではないので、無料のまま残す。
+  const F = call(`/api/v1/features?date=${date}`)
+  if (F) {
+    const { gachigachi, ana, ...pub } = F
+    if (gachigachi || ana) paid.push([`paid/features/${date}`, { date, gachigachi, ana }])
+    F.gachigachi = null; F.ana = null
+    F.member_only = !!(gachigachi?.races?.length || ana?.races?.length)
+    void pub
+  }
+  docs.unshift([`races/${date}`, races], [`tenkai/${date}`, tk], [`features/${date}`, F])
   await put(docs)
   await putPaid(paid, date)
   if (withRacers) {
