@@ -15,7 +15,7 @@
 //   ・無料枠を守るため、中身が変わっていないものは送らない（前回の中身の指紋と比べる）。
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, rmSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { apiRoute } from './api.mjs'
@@ -147,8 +147,17 @@ async function putPaid(docs, date) {
 
 async function removeOld(keepDates) {
   // 古い日のレースは消して、無料枠の500MBを守る（手元の本体には全部残っている）
-  if (LOCAL) return
   const keep = new Set(keepDates.map((d) => d.replace(/-/g, '')))
+  if (LOCAL) {
+    // 試し用も消す。残しておくと、決まりを変える前の古い書き出し（展開予想が全部公開だった頃のもの）が
+    // 残って点検が通らなくなる（2026-09-23にそうなった）
+    for (const f of existsSync(OUT) ? readdirSync(OUT) : []) {
+      const k = f.replace(/\.json$/, '').replaceAll('__', '/')
+      const m = k.match(/^(?:paid\/)?race\/(\d{8})-/) ?? k.match(/^(?:paid\/)?(?:races|tenkai|features)\/(\d{4}-\d{2}-\d{2})$/)
+      if (m && !keep.has(m[1].replace(/-/g, ''))) rmSync(join(OUT, f))
+    }
+    return
+  }
   for (const k of Object.keys(state)) {
     const m = k.match(/^(?:paid\/)?race\/(\d{8})-/) ?? k.match(/^(?:paid\/)?(?:races|tenkai|features)\/(\d{4}-\d{2}-\d{2})$/)
     if (!m) continue
