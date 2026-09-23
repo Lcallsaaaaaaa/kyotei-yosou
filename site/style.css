@@ -749,3 +749,41 @@ body {
   .orow .oval { font-size: 13.5px; }
   .tri-grid { grid-template-columns: repeat(6, 128px); min-width: 0; }
 }
+
+/* ---------- スマホのヒーローを正方形くらいに（2026-09-23） ----------
+   もとは 375×548（縦1.46倍）。マスコットのために下へ190pxの余白を取っていたのが主因。
+   マスコットを「下」から「右上」に移し、余白は横方向で取る。
+   本文（見出し・リード）だけ右を空け、数字のカードは負のマージンで全幅に戻している。 */
+@media (max-width: 719px) {
+  .hero {
+    min-height: 0;
+    padding: 22px 120px 16px 18px;
+  }
+  .hero::after {                 /* マスコット：下 → 右上へ */
+    top: 6px;
+    right: -6px;
+    bottom: auto;
+    width: 126px;
+    height: 148px;
+    background-position: center top;
+  }
+  .hero-eyebrow { font-size: 11.5px; letter-spacing: .08em; margin-bottom: 4px; }
+  .hero h1 { font-size: 25px; max-width: none; margin-bottom: 7px; }
+  .hero-lead { font-size: 13px; line-height: 1.7; }
+  .hero-stats {
+    margin-right: -102px;        /* 数字のカードだけ全幅に戻す */
+    grid-template-columns: repeat(2, 1fr);
+    gap: 7px;
+    margin-top: 13px;
+  }
+  .hero-stats > div { padding: 8px 10px; }
+  .hero-stats b { font-size: 20px; }
+  .hero-stats span { font-size: 10.5px; }
+  .hero-stats small { font-size: 9.5px; margin-top: 0; }
+}
+@media (max-width: 390px) {
+  .hero { min-height: 0; padding-right: 112px; }
+  .hero::after { width: 118px; height: 138px; }
+  .hero h1 { font-size: 23px; }
+  .hero-stats { margin-right: -94px; }
+}
