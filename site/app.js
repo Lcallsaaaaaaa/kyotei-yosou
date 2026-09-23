@@ -27,6 +27,85 @@
     return p
   }
 
+  // ---------- 会員（合言葉） ----------
+  // 有料の中身は「合言葉で開ける形」で置き場に入っている（scripts/seal.mjs）。
+  // 合言葉から鍵を作ってこの画面で開く。鍵は端末の中だけに置き、どこにも送らない。
+  const MEM = 'nagi_member'
+  const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
+  const memberState = () => { try { return JSON.parse(localStorage.getItem(MEM) || 'null') } catch { return null } }
+  const periodOfPhrase = (p) => { const m = String(p).trim().match(/^nagi-(\d\d)(\d\d)-/i); return m ? `20${m[1]}-${m[2]}` : null }
+  const jaPeriod = (p) => (p ? `${p.slice(0, 4)}年${Number(p.slice(5, 7))}月` : '')
+  async function deriveKey(phrase, period) {
+    const e = new TextEncoder()
+    const base = await crypto.subtle.importKey('raw', e.encode(phrase.trim()), 'PBKDF2', false, ['deriveBits'])
+    const bits = await crypto.subtle.deriveBits(
+      { name: 'PBKDF2', salt: e.encode('nagi-paid-v1|' + period), iterations: 210_000, hash: 'SHA-256' }, base, 256)
+    return new Uint8Array(bits)
+  }
+  async function openBox(box) {
+    const st = memberState()
+    if (!st || !box || st.period !== box.period) return null
+    try {
+      const key = await crypto.subtle.importKey('raw', b64(st.key), 'AES-GCM', false, ['decrypt'])
+      const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64(box.iv) }, key, b64(box.ct))
+      return JSON.parse(new TextDecoder().decode(plain))
+    } catch { return null }
+  }
+  const paidDoc = async (key) => openBox(await doc(key))
+  /** 有料のところに出す案内。date を渡すと、その月の会員かどうかも見る。 */
+  function lockPanel(what, date) {
+    const st = memberState()
+    const stale = st && date && st.period !== date.slice(0, 7)
+    return `<div class="panel lock"><b>${esc(what)}は会員の方だけご覧いただけます</b>
+      <p>${stale ? `お手持ちの合言葉は${jaPeriod(st.period)}のものです。${jaPeriod(date.slice(0, 7))}の合言葉を入れてください。`
+        : '月額300円の会員になると、全レースの展開予想とAI予想（3連複2点プラン）がご覧いただけます。'}</p>
+      <p><a class="cta" href="#/member">合言葉を入れる</a>${C.noteUrl ? ` <a class="cta ghost" href="${esc(C.noteUrl)}" target="_blank" rel="noopener">会員になる（月300円）</a>` : ''}</p></div>`
+  }
+  async function memberPage() {
+    setNav('member')
+    const st = memberState()
+    const now = jstToday().slice(0, 7)
+    const ok = st && st.period === now
+    view(`<h1>会員</h1>
+      <div class="panel">${ok ? `<p><b>${jaPeriod(st.period)}の会員として開いています。</b></p>
+          <p class="sub">合言葉は毎月変わります。翌月ぶんは月末にnoteのメンバーシップでお知らせします。</p>
+          <p><button type="button" class="cta ghost" id="mem-clear">この端末から合言葉を消す</button></p>`
+        : `<p>noteのメンバーシップ（月額300円）に入ると、毎月の合言葉が届きます。</p>
+          <p>その合言葉をここに入れると、この端末では<b>その月のあいだ入れ直さずに</b>、全レースの展開予想とAI予想（3連複2点プラン）が開きます。</p>
+          ${st ? `<p class="note">いま入っているのは${jaPeriod(st.period)}の合言葉です。今月（${jaPeriod(now)}）ぶんを入れ直してください。</p>` : ''}`}</div>
+      ${ok ? '' : `<div class="panel" style="margin-top:12px">
+        <label for="mem-in"><b>合言葉</b></label>
+        <p class="sub">例： nagi-2610-XXXX-XXXX（大文字小文字は問いません）</p>
+        <div class="mem-form"><input id="mem-in" type="text" inputmode="latin" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="nagi-　　　-　　　-　　　"></div>
+        <p><button type="button" class="cta" id="mem-go">開く</button></p>
+        <p id="mem-msg" class="sub"></p>
+        ${C.noteUrl ? `<p><a href="${esc(C.noteUrl)}" target="_blank" rel="noopener">まだ会員でない方（noteで月額300円）→</a></p>` : ''}</div>`}
+      <p class="note">合言葉はこの端末の中だけに保存され、外には送られません。お連れの方やSNSへ教えないでください。</p>`)
+    document.getElementById('mem-clear')?.addEventListener('click', () => { localStorage.removeItem(MEM); cache.clear(); route() })
+    const go = document.getElementById('mem-go'), input = document.getElementById('mem-in'), msg = document.getElementById('mem-msg')
+    const submit = async () => {
+      const phrase = (input.value || '').trim()
+      const period = periodOfPhrase(phrase)
+      if (!period) { msg.textContent = '合言葉の形がちがうようです（nagi- から始まります）。'; return }
+      msg.textContent = '確かめています…'; go.disabled = true
+      try {
+        const key = await deriveKey(phrase, period)
+        localStorage.setItem(MEM, JSON.stringify({ period, key: btoa(String.fromCharCode(...key)) }))
+        cache.clear()
+        // その月の中身がすでにあれば、本当に開けるかここで確かめる
+        const probe = await doc(`paid/tenkai/${jstToday()}`)
+        if (probe && probe.period === period && !(await openBox(probe))) {
+          localStorage.removeItem(MEM); go.disabled = false
+          msg.textContent = 'この合言葉では開きませんでした。打ちまちがいがないかご確認ください。'
+          return
+        }
+        location.hash = '#/tenkai'
+      } catch (e) { go.disabled = false; msg.textContent = '開けませんでした（' + (e.message || e) + '）' }
+    }
+    go?.addEventListener('click', submit)
+    input?.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit() })
+  }
+
   // ---------- 小道具 ----------
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
   const dash = (v, d = 2) => (v == null || v === '' ? '―' : typeof v === 'number' ? v.toFixed(d) : esc(v))
@@ -39,7 +118,7 @@
   const jstToday = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10)
   const nowHM = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(11, 16)
   const bar = (p, max = 100) => `<span class="probbar"><i style="width:${Math.max(2, (p ?? 0) / max * 70)}px"></i><b>${pct(p)}</b></span>`
-  const MORE = ['schedule', 'analysis', 'venues', 'results']
+  const MORE = ['schedule', 'analysis', 'venues', 'results', 'member']
   const setNav = (k) => {
     document.querySelectorAll('[data-nav]').forEach((a) => a.classList.toggle('on', a.dataset.nav === k || (a.dataset.nav === 'more' && MORE.includes(k))))
     const m = document.getElementById('more'); if (m) { m.hidden = true; document.querySelector('.more-btn')?.setAttribute('aria-expanded', 'false') }
@@ -140,7 +219,15 @@
     const state = R.cancelled ? '<span class="badge gray">中止・順延</span>' : R.result ? '<span class="badge gray">確定</span>' : R.closed ? '<span class="badge gray">締切</span>' : ''
     const free = R.free_pick ? `<div class="panel freepick"><b>無料予想</b>　単勝 ${waku(R.free_pick.lane)} ${esc(R.free_pick.racer ?? '')}（1着確率 ${pct(R.free_pick.probability)}）
       ${R.free_pick.hit == null ? '' : R.free_pick.hit ? `<span class="hit">的中 ${yen(R.free_pick.payout)}</span>` : '<span class="miss">不的中</span>'}</div>` : ''
-    const cta = C.noteUrl ? `<a class="cta" href="${esc(C.noteUrl)}" target="_blank" rel="noopener">このレースの買い目（3連複2点）はnoteで</a>` : ''
+    // 会員ぶん（展開予想・AI予想）。合言葉が入っていなければ開かないので null になる
+    const paid = (R.member_only || R.has_member_picks) ? await paidDoc(`paid/race/${id}`) : null
+    const p2 = paid?.picks?.plan2
+    const aiPick = p2 ? `<div class="panel aipick"><b>AI予想　${esc(p2.name)}</b><span class="badge">自信度 ${p2.confidence}</span>
+      <div class="picks">${p2.picks.map((x) => `<span class="combo">${x.combo.split('=').map((l) => waku(l)).join('')}
+        <small>${pct(x.probability)}</small>${x.hit == null ? '' : x.hit ? `<b class="hit">的中 ${yen(x.payout)}</b>` : '<b class="miss">不的中</b>'}</span>`).join('')}</div>
+      <p class="note">1点100円・2点で200円。回収率は100%未満です。</p></div>` : ''
+    const cta = R.has_member_picks && !p2
+      ? `<a class="cta" href="#/member">このレースのAI予想（3連複2点）を見る（会員・月300円）</a>` : ''
     const E = R.entries ?? []
     const maxP = Math.max(...E.map((e) => e.win_probability ?? 0), 1)
 
@@ -207,8 +294,8 @@
           ${has ? '' : '<p class="note">展示はまだです。展示が終わると展示タイムと進入が入ります。</p>'}`
       },
       tenkai: () => {
-        const t = R.tenkai
-        if (!t) return '<p class="empty">展開予想はまだありません。</p>'
+        const t = R.tenkai ?? paid?.tenkai
+        if (!t) return R.member_only ? lockPanel('展開予想', R.date) : '<p class="empty">展開予想はまだありません。</p>'
         const km = t.kimarite.slice(0, 5)
         return `<div class="panel"><div class="shape">${esc(t.shape)}</div>
           <ol class="lines">${t.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ol></div>
@@ -261,7 +348,7 @@
     view(`<div class="race-head"><h1>${esc(R.venue)} ${R.race_no}R</h1><span class="sub">${md(R.date)}(${wd(R.date)}) 締切 ${esc(R.deadline ?? '―')}</span>${state}</div>
       <div class="sub">${esc(R.title ?? '')}　${esc(R.series ?? '')}${R.day_no ? `　${R.day_no}日目` : ''}</div>${conds}
       <nav class="rnav" aria-label="同じ場のレース">${same.map((r) => `<a href="#/race/${r.race_id}/${tab}" class="${r.race_id === id ? 'on' : ''}">${r.race_no}R</a>`).join('')}</nav>
-      ${free}${!R.closed && j.race && (day?.races ?? []).find((r) => r.race_id === id)?.has_paid_picks ? cta : ''}
+      ${free}${aiPick}${!R.closed ? cta : ''}
       <div class="tabs" role="tablist">${TABS.map(([k, n]) => `<button role="tab" aria-selected="${k === tab}" data-tab="${k}">${n}</button>`).join('')}</div>
       <div id="tab">${T[tab]()}</div>`)
     app.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { location.hash = `#/race/${id}/${b.dataset.tab}` }))
@@ -274,10 +361,18 @@
     const tabs = await dayTabs(date, 'tenkai')
     const j = await doc(`tenkai/${date}`)
     if (!j || j.status !== 'ok') return view(`<h1>展開予想</h1>${tabs}<p class="empty">${md(date)} の展開予想はまだありません。</p>`)
-    const rows = [...j.races].sort((a, b) => (a.closed - b.closed) || (a.deadline ?? '').localeCompare(b.deadline ?? ''))
+    // 会員ぶん。合言葉があれば全レース、無ければ無料枠のレースだけになる
+    const mem = j.races.some((r) => r.member_only) ? await paidDoc(`paid/tenkai/${date}`) : null
+    const byId = new Map((mem?.races ?? []).map((r) => [r.race_id, r]))
+    const locked = !mem && j.races.filter((r) => r.member_only).length
+    const rows = [...j.races].map((r) => byId.get(r.race_id) ?? r)
+      .sort((a, b) => (a.closed - b.closed) || (a.deadline ?? '').localeCompare(b.deadline ?? ''))
     view(`<h1>展開予想 <span class="sub">${md(date)}(${wd(date)})</span></h1>${tabs}
+      ${locked ? lockPanel(`${locked}レースの展開予想`, date) : ''}
       <div class="scroll"><table><thead><tr><th class="l">レース</th><th class="l">展開</th><th class="l">本線</th><th class="l">対抗</th><th class="l">決まり手</th></tr></thead><tbody>${
-      rows.map((r) => { const t = r.tenkai; if (!t) return ''
+      rows.map((r) => { const t = r.tenkai
+        if (!t) return `<tr style="opacity:.5"><td class="l"><a href="#/race/${r.race_id}/tenkai">${esc(r.venue)}${r.race_no}R</a><span class="meta">${esc(r.deadline ?? '')}</span></td>
+          <td class="l" colspan="4"><a href="#/member">会員の方だけご覧いただけます →</a></td></tr>`
         return `<tr style="${r.closed ? 'opacity:.55' : ''}"><td class="l"><a href="#/race/${r.race_id}/tenkai">${esc(r.venue)}${r.race_no}R</a><span class="meta">${esc(r.deadline ?? '')}</span></td>
           <td class="l">${esc(t.shape)}</td>
           <td class="l">${waku(t.honmei.lane)} ${esc(t.honmei.likely_move ?? '')} ${pct(t.honmei.win_probability)}</td>
@@ -480,7 +575,7 @@
   }
 
   // ---------- ニュース ----------
-  const newsItem = (n) => `<a class="news-item" href="#/news/${esc(n.slug)}"><span class="news-date">${n.date ? md(n.date) : ''}${n.auto ? ' <span class="badge gray">自動</span>' : ''}</span>
+  const newsItem = (n) => `<a class="news-item" href="#/news/${esc(n.slug)}"><span class="news-date">${n.date ? md(n.date) : ''}</span>
     <b>${esc(n.title)}</b>${n.summary ? `<span class="news-sum">${esc(n.summary.slice(0, 70))}…</span>` : ''}</a>`
   async function newsList(tag) {
     setNav('news')
@@ -490,17 +585,16 @@
     const list = tag ? all.filter((n) => (n.tags ?? []).includes(tag)) : all
     view(`<h1>ニュース</h1>
       ${tags.length ? `<div class="chips"><a href="#/news" class="${tag ? '' : 'on'}">すべて</a>${tags.map((t) => `<a href="#/news/tag/${encodeURIComponent(t)}" class="${t === tag ? 'on' : ''}">${esc(t)}</a>`).join('')}</div>` : ''}
-      <div class="news-list">${list.map(newsItem).join('') || '<p class="empty">記事はまだありません。</p>'}</div>
-      <p class="note">「自動」の記事は、公式データから当サイトが自動で作ったものです（データにある事実だけで書いています）。</p>`)
+      <div class="news-list">${list.map(newsItem).join('') || '<p class="empty">記事はまだありません。</p>'}</div>`)
   }
   async function article(slug) {
     setNav('news')
     const a = await doc(`news/${slug}`)
     if (!a) return view('<p class="empty">この記事は見つかりません。</p>')
-    view(`<article class="article"><div class="sub">${a.date ? md(a.date) : ''}${a.auto ? '　<span class="badge gray">自動生成</span>' : ''}${(a.tags ?? []).map((t) => ` <a class="badge" href="#/news/tag/${encodeURIComponent(t)}">${esc(t)}</a>`).join('')}</div>
+    view(`<article class="article"><div class="sub">${a.date ? md(a.date) : ''}${(a.tags ?? []).map((t) => ` <a class="badge" href="#/news/tag/${encodeURIComponent(t)}">${esc(t)}</a>`).join('')}</div>
       <h1>${esc(a.title)}</h1><div class="article-body">${a.html}</div>
       ${a.venue ? `<p><a href="#/venue/${a.venue}">${VENUES[a.venue]}の攻略ページへ →</a></p>` : ''}
-      <p class="note">${a.auto ? 'この記事は公式データから自動で作成しました。' : ''}予想は的中を約束するものではありません。舟券の購入は20歳からです。</p>
+      <p class="note">予想は的中を約束するものではありません。舟券の購入は20歳からです。</p>
       <p><a href="#/news">← ニュース一覧へ</a></p></article>`)
   }
 
@@ -523,6 +617,7 @@
       if (p[0] === 'schedule') return await schedule()
       if (p[0] === 'meeting') return await meeting(Number(p[1]), p[2])
       if (p[0] === 'analysis') return await analysis(p[1])
+      if (p[0] === 'member') return await memberPage()
       return await home()
     } catch (e) { fail(e) }
   }

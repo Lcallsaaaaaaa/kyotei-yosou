@@ -19,6 +19,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { apiRoute } from './api.mjs'
+import { seal, isSealed, periodOf, phraseOf, open as unseal } from './seal.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const argv = process.argv.slice(2)
@@ -50,11 +51,22 @@ function call(path) {
 // ---------- 有料部分を外す ----------
 function publicRace(j) {
   if (!j?.race) return null
-  const { prediction, picks, ...race } = j.race
+  const { prediction, picks, tenkai, ...race } = j.race
   const free = picks?.free_win ? { lane: picks.free_win.lane, racer: picks.free_win.racer,
     probability: picks.free_win.probability, hit: picks.free_win.hit, payout: picks.free_win.payout } : null
+  // 無料枠（単勝1点）のレースだけは、展開予想も入口として無料で見せる
   return { api_version: j.api_version, prediction_generated_at: j.prediction_generated_at,
-    race: { ...race, free_pick: free } }
+    race: { ...race, free_pick: free, tenkai: free ? tenkai : null,
+      member_only: !free && !!tenkai, has_member_picks: !!(picks?.plan2 || picks?.haishin) } }
+}
+// 会員（月300円）に見せるぶん。これは必ず seal() で閉じてから送る。
+function memberRace(j) {
+  if (!j?.race) return null
+  const { prediction, picks, tenkai } = j.race
+  if (!tenkai && !picks?.plan2 && !picks?.haishin) return null
+  const { free_win, spot, ...paidPicks } = picks ?? {}
+  return { race_id: j.race.race_id, tenkai: tenkai ?? null,
+    picks: Object.keys(paidPicks).length ? paidPicks : null, prediction: prediction ?? null }
 }
 function assertNoPaid(key, obj) {
   const s = JSON.stringify(obj)
@@ -69,10 +81,17 @@ const state = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8')) : {}
 const hash = (o) => createHash('sha1').update(JSON.stringify(o)).digest('hex')
 let sent = 0, skipped = 0
 async function put(docs) {
+  for (const [key, body] of docs) {
+    if (!body) continue
+    if (key.startsWith('paid/')) throw new Error(`${key} は putPaid で送ること`)
+    assertNoPaid(key, body)
+  }
+  await putRaw(docs)
+}
+async function putRaw(docs) {
   const todo = []
   for (const [key, body] of docs) {
     if (!body) continue
-    assertNoPaid(key, body)
     const h = hash(body)
     if (!LOCAL && state[key] === h) { skipped++; continue }
     todo.push({ key, body, h })
@@ -102,12 +121,36 @@ async function put(docs) {
   }
   writeFileSync(STATE, JSON.stringify(state))
 }
+// ---------- 会員ぶん（合言葉で開く）----------
+// 中身は seal() で閉じてから送る。置き場は誰でも読めるが、合言葉がなければ中身は読めない。
+// 閉じ忘れ・閉じそこないを防ぐため、ここで3つ確かめてから送る。
+async function putPaid(docs, date) {
+  const period = periodOf(date)
+  const out = []
+  for (const [key, body] of docs) {
+    if (!body) continue
+    if (!key.startsWith('paid/')) throw new Error(`${key} は paid/ で始めること`)
+    const box = seal(body, period, key)
+    if (!isSealed(box)) throw new Error(`${key} を閉じられていない`)
+    const s = JSON.stringify(box)
+    for (const bad of ['"prediction":', '"picks":', '"tenkai":', '"trio":['])
+      if (s.includes(bad)) throw new Error(`${key} に平文が残っている（${bad}）。送らずに止める`)
+    if (JSON.stringify(unseal(box, phraseOf(period))) !== JSON.stringify(body)) throw new Error(`${key} を開け直せない`)
+    out.push([key, box])
+  }
+  if (!out.length) return
+  // put() は paid/ を弾くので、確かめ終えたここだけ通す
+  const keys = out.map(([k]) => k)
+  for (const k of keys) if (!k.startsWith('paid/')) throw new Error('ありえない')
+  await putRaw(out)
+}
+
 async function removeOld(keepDates) {
   // 古い日のレースは消して、無料枠の500MBを守る（手元の本体には全部残っている）
   if (LOCAL) return
   const keep = new Set(keepDates.map((d) => d.replace(/-/g, '')))
   for (const k of Object.keys(state)) {
-    const m = k.match(/^race\/(\d{8})-/) ?? k.match(/^(?:races|tenkai|features)\/(\d{4}-\d{2}-\d{2})$/)
+    const m = k.match(/^(?:paid\/)?race\/(\d{8})-/) ?? k.match(/^(?:paid\/)?(?:races|tenkai|features)\/(\d{4}-\d{2}-\d{2})$/)
     if (!m) continue
     const ymd = m[1].replace(/-/g, '')
     if (keep.has(ymd)) continue
@@ -122,14 +165,26 @@ async function removeOld(keepDates) {
 async function syncDay(date, withRacers) {
   const races = call(`/api/v1/races?date=${date}`)
   if (!races || races.status !== 'ok') return 0
-  const docs = [[`races/${date}`, races], [`tenkai/${date}`, call(`/api/v1/tenkai?date=${date}`)],
-    [`features/${date}`, call(`/api/v1/features?date=${date}`)]]
+  const docs = [], paid = [], free = new Set()
   for (const r of races.races) {
-    const d = publicRace(call(`/api/v1/race?id=${r.race_id}`))
+    const j = call(`/api/v1/race?id=${r.race_id}`)
+    const d = publicRace(j)
     r.free_pick = d?.race?.free_pick ? d.race.free_pick.lane : null   // 一覧に「無料」の印を出すため
+    if (r.free_pick) free.add(r.race_id)
+    r.member_only = !!d?.race?.member_only                            // 一覧に「会員」の印を出すため
     docs.push([`race/${r.race_id}`, d])
+    const m = memberRace(j)
+    if (m) paid.push([`paid/race/${r.race_id}`, m])
   }
+  // 展開予想の一覧。無料枠のレースだけ中身を出し、ほかは会員ぶん（合言葉で開く）へ回す
+  const tk = call(`/api/v1/tenkai?date=${date}`)
+  if (tk?.races?.length) {
+    paid.push([`paid/tenkai/${date}`, { date, races: tk.races }])
+    tk.races = tk.races.map((r) => (free.has(r.race_id) ? r : { ...r, tenkai: null, member_only: !!r.tenkai }))
+  }
+  docs.unshift([`races/${date}`, races], [`tenkai/${date}`, tk], [`features/${date}`, call(`/api/v1/features?date=${date}`)])
   await put(docs)
+  await putPaid(paid, date)
   if (withRacers) {
     const ids = new Set()
     for (const [k, d] of docs) if (k.startsWith('race/')) for (const e of d?.race?.entries ?? []) if (e.racer_id) ids.add(e.racer_id)
@@ -189,9 +244,9 @@ async function syncArticles() {
   const news = loadDir(join(ROOT, 'content', 'news'))
     .sort((a, b) => String(b.meta.date ?? '').localeCompare(String(a.meta.date ?? '')) || b.slug.localeCompare(a.slug))
   const docs = [['news/index', { articles: news.slice(0, 200).map((n) => ({ slug: n.slug, title: n.meta.title, date: n.meta.date ?? null,
-    tags: n.meta.tags, venue: n.meta.venue, auto: n.slug.startsWith('auto-'), summary: n.summary })) }]]
+    tags: n.meta.tags, venue: n.meta.venue, summary: n.summary })) }]]
   for (const n of news.slice(0, 200)) docs.push([`news/${n.slug}`, { slug: n.slug, title: n.meta.title, date: n.meta.date ?? null, tags: n.meta.tags,
-    venue: n.meta.venue, auto: n.slug.startsWith('auto-'), html: n.html }])
+    venue: n.meta.venue, html: n.html }])
   const manual = new Map(loadDir(join(ROOT, 'content', 'venues')).map((m) => [Number(m.slug), m]))
   const avg = call('/api/v1/analysis?kind=average'), dem = call('/api/v1/analysis?kind=demoku')
   for (let j = 1; j <= 24; j++) {

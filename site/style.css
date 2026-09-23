@@ -221,3 +221,24 @@ h3 { font-size: 14px; margin: 10px 0 6px; color: var(--ink-2); }
   .km { grid-template-columns: 6.5em 1fr 3.3em; }
   .foot { padding-bottom: 20px; }
 }
+
+/* ---------- 会員（合言葉） ---------- */
+.lock { margin: 12px 0; border-left: 4px solid var(--signal); }
+.lock b { display: block; font-size: 15px; }
+.lock p { margin: 8px 0 0; font-size: 13.5px; color: var(--ink-2); }
+.cta.ghost { background: none; color: var(--accent); border: 1.5px solid var(--accent); }
+.mem-form { display: flex; gap: 8px; margin-top: 6px; }
+.mem-form input { flex: 1; min-width: 0; font: inherit; font-size: 17px; letter-spacing: .06em; text-transform: uppercase;
+  padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink); }
+.aipick { margin-top: 12px; border-left: 4px solid var(--signal); }
+.aipick b { font-size: 15px; margin-right: 8px; }
+.picks { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.combo { display: flex; align-items: center; gap: 6px; background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 10px; padding: 8px 12px; }
+.combo small { color: var(--ink-2); font-size: 12px; }
+.rc.member::after { content: '会員'; display: block; font-size: 9.5px; font-weight: 700; color: var(--signal); }
+@media (max-width: 719px) {
+  .picks { gap: 8px; }
+  .combo { padding: 8px 10px; }
+  .mem-form input { font-size: 16px; }
+}

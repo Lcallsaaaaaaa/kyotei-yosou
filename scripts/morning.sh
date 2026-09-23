@@ -67,6 +67,13 @@ echo "--- ニュースの自動生成（前日の結果・今日の開催・グ�
 # 2026-09-23：データの事実だけで書く。content/news/ に置く（公開は sync-public.mjs）
 node --max-old-space-size=4096 scripts/news.mjs 2>&1 | tail -1
 
+# 月末が近づいたら、翌月の合言葉を note に貼るよう知らせる（会員の仕組み.md）
+if [ "$(date +%d)" -ge 25 ]; then
+  echo ""
+  echo "--- お知らせ：翌月の合言葉を note のメンバーシップに貼る時期です ---"
+  echo "    node scripts/paid-key.mjs --note --next"
+fi
+
 echo ""
 echo "=== 完了 $(date +%H:%M:%S) ==="
 echo "  見張り表:      http://localhost:3940/asa"
