@@ -1,4 +1,4 @@
-// ボートレース研究所 ― 画面の動き
+// 凪 ― 画面の動き
 // データは Supabase の docs 表（公開モード）か site/_local/（このPCで試すとき）から読む。形は /api/v1 と同じ。
 // ページ： #/ #/d/日付（出走表）・#/race/ID・#/tenkai/日付・#/results・#/venues・#/venue/場・#/racer/登番
 (() => {
@@ -152,7 +152,8 @@
 
   // ---------- 検索エンジン向けの見出し ----------
   // ページごとに題と説明文を変える。全ページ同じだと検索結果で区別がつかず、順位も上がらない。
-  const SITE = C.siteName || 'ボートレース研究所'
+  // 画面と検索結果で使うブランド名。データ接続設定とは分けて管理する。
+  const SITE = 'ボートレース研究所'
   const el = (tag, attrs) => Object.assign(document.createElement(tag), attrs)
   function meta(title, desc, opts = {}) {
     // 題の後ろにサイト名を足す。ただし題にすでに入っているときは足さない（二重になる）
@@ -276,10 +277,10 @@
     const RS = isToday ? await doc('results/30') : null
     const fw = RS?.total?.free_win
     const hero = isToday ? `<section class="hero">
-      <p class="hero-eyebrow">全国24場・公式データだけで毎日つくっています</p>
+      <p class="hero-eyebrow">凪X演算分析×AI</p>
       <h1>${esc(SITE)}</h1>
-      <p class="hero-lead">出走表・直前情報・オッズ・結果をまとめ、AIが出した1着確率を添えています。
-        当たらなかった日も含めて実績を公開しています。</p>
+      <p class="hero-lead">全国24場の出走表・直前情報・オッズ・結果を、見やすくひとつに。
+        AIの1着確率と、外れた日も含む実績をそのまま公開しています。</p>
       <div class="hero-stats">
         <div><b>${byV.size}</b><span>きょうの開催場</span></div>
         <div><b>${j.races.length}</b><span>きょうのレース</span></div>
@@ -469,20 +470,64 @@
           <p class="note">結果の元：${esc(x.source)}（当日は速報、翌日に競走成績で確定）。払戻は100円あたり</p></div>`
       },
       // オッズ（締切前の最新、終わったレースは確定）
+      // ★見せ方の考え方（2026-09-23 に作り直し）
+      //   ・数字の羅列だと読めない。**枠番の色**を付けて、組み合わせが形で分かるようにする
+      //   ・**オッズの安い・高いを濃さで**表す。4段階（〜9.9／10〜29.9／30〜99.9／100倍〜）
+      //   ・3連単120点は「1着ごとの6つの列・2着ごとの小見出し」。公式と同じ並びで、目で追える
+      //   ・2連単などは**人気順に番号を振る**。何番人気かがすぐ分かる
       odds: () => {
         const o = R.odds
         if (!o) return '<p class="empty">オッズはまだありません（締切の約20分前から入ります）。</p>'
-        const tri = (obj, a) => [1, 2, 3, 4, 5, 6].filter((b) => b !== a)
-        const t3 = o.trifecta ? `<h2>3連単</h2><div class="scroll"><table><thead><tr><th class="l">1着</th><th class="l">2着-3着：オッズ</th></tr></thead><tbody>${
-          [1, 2, 3, 4, 5, 6].map((a) => `<tr><td class="l">${waku(a)}</td><td class="l" style="white-space:normal">${tri(o.trifecta, a).flatMap((b) => [1, 2, 3, 4, 5, 6].filter((c) => c !== a && c !== b)
-            .map((c) => `<span style="display:inline-block;min-width:92px">${b}-${c} <b>${dash(o.trifecta[`${a}-${b}-${c}`], 1)}</b></span>`)).join('')}</td></tr>`).join('')}</tbody></table></div>` : ''
-        const list = (obj, sep, title) => obj ? `<h2>${title}</h2><div class="panel" style="display:flex;flex-wrap:wrap;gap:6px 14px">${Object.entries(obj)
-          .sort((a, b) => a[1] - b[1]).map(([k, v]) => `<span class="num">${esc(k.split('-').join(sep))} <b>${dash(v, 1)}</b></span>`).join('')}</div>` : ''
+        const L = [1, 2, 3, 4, 5, 6]
+        const heat = (v) => (v == null ? '' : v < 10 ? 'h1' : v < 30 ? 'h2' : v < 100 ? 'h3' : 'h4')
+        const wk = (n) => `<i class="wkm w${n}">${n}</i>`                       // 小さい枠番
+        const cmb = (k) => k.split('-').map(wk).join('')                        // 組番を枠色で
+        const od = (v) => (v == null ? '―' : v.toFixed(1))
+        const prob = new Map((R.entries ?? []).map((e) => [e.lane, e.win_probability]))
+        const nameOf = new Map((R.entries ?? []).map((e) => [e.lane, e.name]))
+
+        // 人気順の並び（番号つき）
+        const ranked = (obj, title, note) => {
+          if (!obj) return ''
+          const rows = Object.entries(obj).filter(([, v]) => v != null).sort((a, b) => a[1] - b[1])
+          if (!rows.length) return ''
+          return `<h2>${title} <span class="sub">${rows.length}点・人気順</span></h2>
+            ${note ? `<p class="note">${note}</p>` : ''}
+            <div class="odds-rank">${rows.map(([k, v], i) =>
+              `<div class="orow ${heat(v)}"><span class="opop">${i + 1}</span><span class="ocmb">${cmb(k)}</span><b class="oval">${od(v)}</b></div>`).join('')}</div>`
+        }
+
+        // 3連単：1着ごとに1列、その中を2着でまとめる（公式と同じ並び）
+        const t3 = o.trifecta ? `<h2>3連単 <span class="sub">120点・1着ごと</span></h2>
+          <p class="note">横にスクロールできます。色が濃いほど人気（オッズが安い）です。</p>
+          <div class="tri-scroll"><div class="tri-grid">${L.map((a) => `<div class="tri-col">
+            <div class="tri-head">${waku(a)}<span>${esc(nameOf.get(a) ?? '')}</span></div>
+            ${L.filter((b) => b !== a).map((b) => `<div class="tri-sub">2着 ${wk(b)}</div>
+              ${L.filter((c) => c !== a && c !== b).map((c) => {
+                const v = o.trifecta[`${a}-${b}-${c}`]
+                return `<div class="tri-cell ${heat(v)}"><span>${wk(c)}</span><b>${od(v)}</b></div>`
+              }).join('')}`).join('')}
+          </div>`).join('')}</div></div>` : ''
+
+        // 単勝・複勝は AI の1着確率と並べる（人気と実力の見え方が分かる）
+        const win = o.win?.length ? `<h2>単勝・複勝</h2>
+          <div class="scroll"><table><thead><tr><th class="l">枠・選手</th><th>単勝</th><th>複勝</th><th>AIの1着確率</th></tr></thead><tbody>${
+            [...o.win].map((w) => {
+              const p = o.place?.find((x) => x.lane === w.lane)
+              return `<tr><td class="l">${waku(w.lane)} <span class="name">${esc(nameOf.get(w.lane) ?? '')}</span></td>
+                <td><b class="oval ${heat(w.odds)}">${od(w.odds)}</b></td>
+                <td>${p ? od(p.low) + (p.high ? '〜' + od(p.high) : '') : '―'}</td>
+                <td>${pct(prob.get(w.lane))}</td></tr>`
+            }).join('')}</tbody></table></div>
+          <p class="note">単勝オッズは「どれだけ買われているか」、AIの1着確率は「データから見た強さ」です。別のものなので、そのまま並べています。${o.win_taken ? `　単勝・複勝：${esc(o.win_taken)}` : ''}</p>` : ''
+
         return `<p class="note">${esc(o.kind)}のオッズ${o.taken_at ? `（${esc(o.taken_at)}・締切${o.minutes_before}分前）` : ''}。${esc(o.note ?? '')}</p>
-          ${o.win?.length ? `<h2>単勝・複勝</h2><div class="scroll"><table><thead><tr><th class="l">枠</th><th>単勝</th><th>複勝</th></tr></thead><tbody>${
-            o.win.map((w, i) => `<tr><td class="l">${waku(w.lane)}</td><td>${dash(w.odds, 1)}</td><td>${o.place?.[i] ? dash(o.place[i].low, 1) + (o.place[i].high ? '〜' + dash(o.place[i].high, 1) : '') : '―'}</td></tr>`).join('')}</tbody></table></div>
-            ${o.win_taken ? `<p class="note">単勝・複勝：${esc(o.win_taken)}</p>` : ''}` : ''}
-          ${list(o.trio, '=', '3連複（人気順）')}${list(o.exacta, '-', '2連単（人気順）')}${list(o.quinella, '=', '2連複（人気順）')}${t3}`
+          <div class="odds-legend"><span class="sub">オッズの目安</span>
+            <span class="okey h1">〜9.9倍</span><span class="okey h2">10〜29.9</span><span class="okey h3">30〜99.9</span><span class="okey h4">100倍〜</span></div>
+          ${win}${t3}
+          ${ranked(o.trio, '3連複', '着順は問いません。')}
+          ${ranked(o.exacta, '2連単', '1着→2着の順番どおりに当てる買い方です。')}
+          ${ranked(o.quinella, '2連複', '2着までに入る2艇を、順番を問わず当てる買い方です。')}`
       },
       // 出目ランク（この場・このレース番号の直近1年）
       demoku: () => {

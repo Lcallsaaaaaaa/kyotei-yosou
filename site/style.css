@@ -1,35 +1,38 @@
-/* ボートレース研究所 ― 画面の見た目
-   色は「凪いだ水面」から：霧がかった水色の地、墨の文字、深い青緑、合図の橙。
+/* 凪 ― ボートレース情報を、軽やかに読みやすく。
+   色は「凪いだ水面」から：空色の地、濃紺の文字、澄んだ青緑、合図の珊瑚色。
    枠番の色は公式と同じ（1白・2黒・3赤・4青・5黄・6緑）。 */
 :root {
-  --ground: #edf2f1;
+  --ground: #f2f8fa;
   --panel: #ffffff;
-  --panel-2: #f5f8f7;
-  --ink: #14232b;
-  --ink-2: #4d6068;
-  --line: #d3dedc;
-  --accent: #0f5e61;
-  --accent-soft: #d8ebe9;
-  --signal: #c96f1c;
-  --hit: #13724a;
-  --miss: #9a3b2e;
-  --bar: #0f5e61;
-  --shadow: 0 1px 2px rgba(20, 35, 43, .06), 0 4px 14px rgba(20, 35, 43, .05);
-  --r: 12px;
-  --font: 'Zen Kaku Gothic New', system-ui, -apple-system, 'Hiragino Sans', 'Yu Gothic UI', sans-serif;
-  --font-brand: 'Shippori Mincho B1', 'Hiragino Mincho ProN', serif;
+  --panel-2: #eaf5f7;
+  --ink: #123142;
+  --ink-2: #557180;
+  --line: #cfe1e7;
+  --accent: #087f9c;
+  --accent-strong: #075f75;
+  --accent-soft: #dff3f6;
+  --signal: #cb4638;
+  --signal-soft: #fff0ec;
+  --hit: #087a55;
+  --miss: #b83c33;
+  --bar: #0b92aa;
+  --shadow: 0 2px 4px rgba(17, 61, 78, .05), 0 12px 32px rgba(17, 61, 78, .07);
+  --shadow-hover: 0 6px 18px rgba(17, 61, 78, .12);
+  --r: 18px;
+  --font: 'Noto Sans JP', system-ui, -apple-system, 'Hiragino Sans', 'Yu Gothic UI', sans-serif;
+  --font-brand: 'Zen Maru Gothic', 'Hiragino Maru Gothic ProN', sans-serif;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --ground: #0d1719; --panel: #142226; --panel-2: #182a2e; --ink: #e3eeec; --ink-2: #9fb3b3;
-    --line: #26393c; --accent: #5cb8b2; --accent-soft: #173a3b; --signal: #e6964c; --hit: #52c28b; --miss: #e07b69;
-    --bar: #5cb8b2; --shadow: none;
+    --ground: #071b24; --panel: #0e2934; --panel-2: #143642; --ink: #eef9fb; --ink-2: #abc4cc;
+    --line: #28505d; --accent: #65d4df; --accent-strong: #a0eef2; --accent-soft: #123f49; --signal: #ff9a86;
+    --signal-soft: #452b2a; --hit: #6ed8a9; --miss: #ff968c; --bar: #65d4df; --shadow: none; --shadow-hover: none;
   }
 }
 :root[data-theme="dark"] {
-  --ground: #0d1719; --panel: #142226; --panel-2: #182a2e; --ink: #e3eeec; --ink-2: #9fb3b3;
-  --line: #26393c; --accent: #5cb8b2; --accent-soft: #173a3b; --signal: #e6964c; --hit: #52c28b; --miss: #e07b69;
-  --bar: #5cb8b2; --shadow: none;
+  --ground: #071b24; --panel: #0e2934; --panel-2: #143642; --ink: #eef9fb; --ink-2: #abc4cc;
+  --line: #28505d; --accent: #65d4df; --accent-strong: #a0eef2; --accent-soft: #123f49; --signal: #ff9a86;
+  --signal-soft: #452b2a; --hit: #6ed8a9; --miss: #ff968c; --bar: #65d4df; --shadow: none; --shadow-hover: none;
 }
 
 * { box-sizing: border-box; }
@@ -307,4 +310,442 @@ h3 { font-size: 14px; margin: 10px 0 6px; color: var(--ink-2); }
   .next-go { margin-left: 0; width: 100%; }
   .free-list { grid-template-columns: 1fr 1fr; }
   .entry-cards { grid-template-columns: 1fr; }
+}
+
+/* =========================================================
+   NAGI visual system
+   データ密度は保ったまま、余白・階層・押しやすさを整える。
+   ========================================================= */
+html { scroll-behavior: smooth; }
+body {
+  min-height: 100vh;
+  font-size: 16px;
+  line-height: 1.72;
+  background:
+    radial-gradient(circle at 8% 0%, rgba(73, 194, 215, .15), transparent 28rem),
+    linear-gradient(180deg, #f8fcfd 0, var(--ground) 34rem);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) body { background: var(--ground); }
+}
+:root[data-theme="dark"] body { background: var(--ground); }
+a, button { -webkit-tap-highlight-color: transparent; }
+a { text-underline-offset: .16em; text-decoration-thickness: .08em; }
+:focus-visible { outline: 3px solid #f1a93b; outline-offset: 3px; }
+
+.top {
+  min-height: 72px;
+  padding: 10px max(18px, calc((100vw - 1180px) / 2));
+  gap: 10px 24px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--line) 78%, transparent);
+  box-shadow: 0 5px 22px rgba(17, 61, 78, .06);
+  backdrop-filter: blur(16px) saturate(1.15);
+}
+.brand { gap: 10px; flex: none; }
+.brand-mark {
+  position: relative;
+  width: 50px;
+  height: 50px;
+  flex: none;
+  border-radius: 0;
+  background: url('/assets/nagi-logo-mark.webp') center / contain no-repeat;
+  filter: drop-shadow(0 5px 8px rgba(8, 127, 156, .2));
+  overflow: visible;
+}
+.brand-mark::before,
+.brand-mark::after {
+  content: '';
+  position: absolute;
+  left: 7px;
+  width: 28px;
+  height: 10px;
+  border: 3px solid rgba(255,255,255,.96);
+  border-color: rgba(255,255,255,.96) transparent transparent transparent;
+  border-radius: 50%;
+}
+.brand-mark::before, .brand-mark::after { display: none; }
+.brand-copy { display: grid; line-height: 1; gap: 3px; }
+.brand-name {
+  font-family: var(--font-brand);
+  font-size: 19px;
+  font-weight: 900;
+  letter-spacing: .035em;
+}
+.brand-sub { font-size: 10px; font-weight: 800; letter-spacing: .05em; color: var(--ink-2); }
+.nav { gap: 2px; padding: 2px; }
+.nav a {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 10px;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 700;
+}
+.nav a:hover { color: var(--accent-strong); background: var(--accent-soft); }
+.nav a.on {
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), #0b98aa);
+  box-shadow: 0 5px 13px rgba(8, 127, 156, .2);
+}
+
+main { max-width: 1180px; padding: 26px 22px 36px; }
+h1, h2 { font-family: var(--font-brand); letter-spacing: .015em; }
+h1 { font-size: clamp(24px, 3vw, 34px); line-height: 1.35; margin-top: 6px; }
+h2 { font-size: 19px; margin: 28px 0 12px; }
+h3 { font-size: 15px; }
+.sub { font-size: 14px; }
+
+.panel, .venue, .stat, .news-item, .free-card, .entry-cards a {
+  border-color: color-mix(in srgb, var(--line) 84%, transparent);
+}
+.panel { padding: 18px; }
+.stat { padding: 14px 16px; }
+.stat b { color: var(--accent-strong); font-size: 25px; }
+.stat span { font-size: 12.5px; font-weight: 600; }
+.venue { padding: 15px 16px; }
+.venue-name { font-family: var(--font-brand); font-size: 18px; }
+.venue-series { font-size: 13px; }
+.panel:hover, .venue:hover, .news-item:hover, .free-card:hover, .entry-cards a:hover {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--line));
+}
+@media (hover: hover) {
+  .news-item, .free-card, .entry-cards a, .rc, .next-race { transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+  .news-item:hover, .free-card:hover, .entry-cards a:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); }
+  .rc:hover { transform: translateY(-1px); border-color: var(--accent); }
+}
+
+.days { gap: 8px; margin-top: 16px; }
+.days a, .chips a {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-color: var(--line);
+  box-shadow: 0 2px 8px rgba(17, 61, 78, .035);
+}
+.days a.on, .chips a.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+.races { gap: 7px; }
+.rc { min-height: 48px; padding: 5px 2px; border-radius: 12px; background: var(--panel-2); }
+.rc b { font-size: 15px; }
+.rc small { font-size: 11px; }
+.rc.next { background: var(--signal-soft); border-color: var(--signal); box-shadow: inset 0 0 0 1px var(--signal); }
+.rc.free::after, .rc.member::after { font-size: 10px; }
+
+.badge { padding: 2px 9px; font-size: 12px; }
+.badge.warn { background: var(--signal-soft); }
+.waku { width: 30px; height: 30px; border-radius: 9px; }
+
+.tabs {
+  gap: 7px;
+  margin: 18px 0 14px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: var(--panel);
+}
+.tabs button {
+  min-height: 42px;
+  padding: 8px 13px;
+  border-radius: 11px;
+  border-bottom: 0;
+}
+.tabs button:hover { color: var(--accent-strong); background: var(--accent-soft); }
+.tabs button[aria-selected="true"] { color: #fff; background: var(--accent); border-bottom-color: transparent; }
+
+.scroll { box-shadow: var(--shadow); }
+table { font-size: 14px; }
+th, td { padding: 10px 9px; }
+th { font-size: 12px; letter-spacing: .02em; }
+tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--panel-2) 44%, transparent); }
+td .name { font-size: 14.5px; }
+td .meta { font-size: 11.5px; }
+
+.cta {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--signal);
+  box-shadow: 0 7px 16px color-mix(in srgb, var(--signal) 25%, transparent);
+}
+.cta:hover { filter: brightness(.95); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .cta { color: #102a34; box-shadow: none; }
+}
+:root[data-theme="dark"] .cta { color: #102a34; box-shadow: none; }
+.rnav { gap: 6px; }
+.rnav a { min-height: 36px; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; }
+
+.hero {
+  position: relative;
+  min-height: 300px;
+  overflow: hidden;
+  isolation: isolate;
+  padding: 38px min(34vw, 390px) 30px 34px;
+  border: 1px solid rgba(255,255,255,.55);
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at 85% 20%, rgba(255,255,255,.26), transparent 23%),
+    linear-gradient(135deg, #0b8fa8 0%, #08738d 50%, #075568 100%);
+  box-shadow: 0 18px 44px rgba(7, 95, 117, .19);
+}
+.hero::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  left: -8%;
+  right: -8%;
+  bottom: -42px;
+  height: 118px;
+  background:
+    radial-gradient(72px 35px at 72px 0, transparent 94%, rgba(255,255,255,.18) 96% 100%, transparent 102%) 0 0 / 144px 70px repeat-x;
+  opacity: .9;
+}
+.hero::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  right: clamp(8px, 4vw, 44px);
+  bottom: -8px;
+  width: min(33vw, 350px);
+  height: min(31vw, 330px);
+  background: url('/assets/nagi-mascot.webp') center bottom / contain no-repeat;
+  filter: drop-shadow(0 12px 16px rgba(1, 40, 54, .18));
+}
+.hero-eyebrow { font-size: 13px; font-weight: 700; letter-spacing: .12em; }
+.hero h1 { max-width: 15em; font-size: clamp(31px, 4vw, 48px); font-weight: 900; letter-spacing: .04em; }
+.hero-lead { max-width: 38em; font-size: 15px; font-weight: 500; }
+.hero-stats { position: relative; z-index: 1; grid-template-columns: repeat(3, minmax(110px, 1fr)); max-width: 580px; }
+.hero-stats > div { border: 1px solid rgba(255,255,255,.18); border-radius: 14px; backdrop-filter: blur(5px); }
+.hero-stats b { font-size: 27px; }
+.hero-stats span { font-size: 12px; }
+
+.next-race { min-height: 62px; border-left-width: 6px; border-radius: 16px; padding: 14px 18px; }
+.next-label { font-size: 12px; }
+.next-race b { font-size: 18px; }
+.next-go { color: var(--accent-strong); }
+.free-card { border-left-width: 5px; border-radius: 16px; padding: 14px 15px; }
+.free-head { font-size: 15px; }
+.entry-cards a { min-height: 112px; align-content: center; border-radius: 18px; padding: 18px; }
+.entry-cards b { color: var(--accent-strong); font-size: 16px; }
+.entry-cards span { font-size: 13px; }
+
+.news-item { padding: 15px 17px; }
+.news-item b { font-size: 16px; }
+.article h1 { font-size: clamp(25px, 3.4vw, 36px); }
+.article-body { font-size: 16px; line-height: 1.9; }
+.article-body h2 { font-size: 20px; }
+
+.mem-form input { min-height: 48px; border-radius: 13px; background: var(--panel); }
+.foot { max-width: 1180px; margin-top: 34px; padding: 24px 22px 44px; font-size: 13px; }
+.foot-nav a { min-height: 38px; display: inline-flex; align-items: center; }
+
+@media (max-width: 1020px) and (min-width: 720px) {
+  .top { padding-inline: 16px; }
+  .nav a { padding-inline: 8px; font-size: 12.5px; }
+  .hero { padding-right: 34%; }
+}
+
+@media (max-width: 719px) {
+  body { font-size: 15.5px; padding-bottom: calc(74px + env(safe-area-inset-bottom)); }
+  .top { min-height: 60px; padding: 7px 14px; }
+  .brand-mark { width: 44px; height: 44px; }
+  .brand-name { font-size: 16px; }
+  .brand-sub { font-size: 9px; }
+  main { padding: 14px 12px 26px; }
+  h1 { font-size: 24px; }
+  h2 { font-size: 18px; }
+  .panel { padding: 15px; }
+
+  .hero {
+    min-height: 410px;
+    margin: 0 -12px 15px;
+    padding: 25px 18px 190px;
+    border: 0;
+    border-radius: 0 0 28px 28px;
+  }
+  .hero::after { right: -2px; bottom: -14px; width: 210px; height: 215px; }
+  .hero h1 { max-width: 12em; font-size: 30px; }
+  .hero-lead { font-size: 14px; }
+  .hero-stats { grid-template-columns: repeat(3, 1fr); gap: 7px; margin-top: 15px; }
+  .hero-stats > div { padding: 9px 8px; }
+  .hero-stats b { font-size: 21px; }
+  .hero-stats span { font-size: 10.5px; }
+  .hero-stats small { font-size: 9.5px; }
+
+  .tabs { top: 59px; margin: 10px -12px; padding: 5px 12px; border-left: 0; border-right: 0; border-radius: 0; }
+  .tabs button { min-height: 42px; padding: 8px 11px; }
+  .tabbar {
+    min-height: 68px;
+    border-top: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+    box-shadow: 0 -8px 24px rgba(17, 61, 78, .1);
+  }
+  .tabbar a, .tabbar button { min-height: 66px; font-size: 11px; border-radius: 12px; }
+  .tabbar svg { width: 24px; height: 24px; }
+  .tabbar .on { position: relative; color: var(--accent); }
+  .tabbar .on::before { content: ''; position: absolute; top: 3px; width: 38px; height: 3px; border-radius: 99px; background: var(--accent); }
+  .more:not([hidden]) { bottom: calc(76px + env(safe-area-inset-bottom)); border-radius: 18px; }
+  .more a { min-height: 48px; display: flex; align-items: center; }
+
+  .free-list { grid-template-columns: 1fr; }
+  .next-race { align-items: center; }
+  .rnav a { min-height: 42px; }
+  th, td { padding: 10px 8px; }
+}
+
+@media (max-width: 390px) {
+  .hero { min-height: 430px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); max-width: 250px; }
+  .hero::after { width: 185px; height: 195px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}
+
+/* =========================================================
+   White calm theme
+   端末設定に左右されず、白を主役にした安心感のある画面にする。
+   ========================================================= */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: light;
+  --ground: #f5fafb;
+  --panel: #ffffff;
+  --panel-2: #edf7f8;
+  --ink: #173544;
+  --ink-2: #58727e;
+  --line: #d5e5e9;
+  --accent: #087f9c;
+  --accent-strong: #075f75;
+  --accent-soft: #e1f4f6;
+  --signal: #cb4638;
+  --signal-soft: #fff0ed;
+  --hit: #087a55;
+  --miss: #b83c33;
+  --bar: #1498ad;
+  --shadow: 0 2px 6px rgba(22, 68, 84, .045), 0 12px 32px rgba(22, 68, 84, .065);
+  --shadow-hover: 0 8px 22px rgba(22, 68, 84, .11);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: light;
+    --ground: #f5fafb; --panel: #ffffff; --panel-2: #edf7f8; --ink: #173544; --ink-2: #58727e;
+    --line: #d5e5e9; --accent: #087f9c; --accent-strong: #075f75; --accent-soft: #e1f4f6;
+    --signal: #cb4638; --signal-soft: #fff0ed; --hit: #087a55; --miss: #b83c33; --bar: #1498ad;
+    --shadow: 0 2px 6px rgba(22, 68, 84, .045), 0 12px 32px rgba(22, 68, 84, .065);
+    --shadow-hover: 0 8px 22px rgba(22, 68, 84, .11);
+  }
+}
+
+body {
+  background:
+    radial-gradient(circle at 8% 0%, rgba(73, 194, 215, .13), transparent 29rem),
+    linear-gradient(180deg, #ffffff 0, var(--ground) 35rem);
+}
+.top {
+  background: rgba(255, 255, 255, .94);
+  border-bottom-color: rgba(204, 224, 230, .9);
+  box-shadow: 0 5px 22px rgba(22, 68, 84, .055);
+}
+.panel, .venue, .stat, .news-item, .free-card, .entry-cards a, .scroll, .tabs {
+  background-color: #ffffff;
+}
+
+/* 枠番はどこに出ても同じ真円。色は公式の1〜6号艇色を保つ。 */
+.waku {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  border-radius: 50%;
+  line-height: 1;
+  box-shadow: 0 2px 5px rgba(23, 53, 68, .13);
+}
+.w1 { border-color: #80939b; box-shadow: inset 0 0 0 1px #ffffff, 0 2px 5px rgba(23, 53, 68, .13); }
+
+.hero {
+  color: var(--ink);
+  border: 1px solid #cce6ea;
+  background:
+    radial-gradient(circle at 84% 18%, rgba(75, 199, 216, .24), transparent 24%),
+    linear-gradient(135deg, #ffffff 0%, #effafb 56%, #e0f3f5 100%);
+  box-shadow: 0 18px 44px rgba(22, 98, 116, .11);
+}
+.hero::before {
+  background: radial-gradient(72px 35px at 72px 0, transparent 94%, rgba(8, 127, 156, .14) 96% 100%, transparent 102%) 0 0 / 144px 70px repeat-x;
+}
+.hero-eyebrow { color: var(--accent-strong); opacity: 1; }
+.hero h1 { color: var(--accent-strong); }
+.hero-lead { color: var(--ink); opacity: .94; }
+.hero-stats > div {
+  color: var(--ink);
+  background: rgba(255, 255, 255, .9);
+  border-color: rgba(172, 215, 223, .82);
+  box-shadow: 0 5px 14px rgba(22, 98, 116, .07);
+}
+.hero-stats b { color: var(--accent-strong); }
+.hero-stats span, .hero-stats small { color: var(--ink-2); opacity: 1; }
+
+:root:not([data-theme="light"]) .cta,
+:root[data-theme="dark"] .cta { color: #ffffff; }
+
+@media (max-width: 719px) {
+  .tabbar { background: rgba(255, 255, 255, .97); }
+  .tabs { background: rgba(245, 250, 251, .97); }
+}
+
+/* ---------- オッズ（2026-09-23 に作り直し） ----------
+   数字の羅列をやめ、枠番の色と「オッズの濃さ」で読めるようにした。
+   h1〜h4 は安い順の4段階。色は accent（人気）から ink-2（薄い）へ。 */
+.wkm { display: inline-grid; place-items: center; width: 19px; height: 19px; border-radius: 5px;
+  font-size: 11.5px; font-weight: 700; font-style: normal; }
+.wkm.w1 { background: #fff; color: #111; box-shadow: inset 0 0 0 1.5px #9aa7a6; }
+.wkm.w2 { background: #1b1b1b; color: #fff; } .wkm.w3 { background: #d8322b; color: #fff; }
+.wkm.w4 { background: #1f5fbf; color: #fff; } .wkm.w5 { background: #f2c500; color: #111; }
+.wkm.w6 { background: #179a4b; color: #fff; }
+
+.odds-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 10px 0 4px; }
+.okey { font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px; }
+.okey.h1, .h1 .oval, .oval.h1 { color: var(--accent-strong, var(--accent)); }
+.okey.h1 { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.okey.h2 { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
+.okey.h3 { background: var(--panel-2); color: var(--ink-2); }
+.okey.h4 { background: var(--panel-2); color: var(--ink-2); opacity: .7; }
+
+/* 人気順の並び（3連複・2連単・2連複） */
+.odds-rank { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 6px; }
+.orow { display: flex; align-items: center; gap: 7px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; padding: 7px 10px; }
+.orow .opop { min-width: 20px; font-size: 11px; font-weight: 700; color: var(--ink-2); text-align: right; }
+.orow .ocmb { display: inline-flex; gap: 2px; }
+.orow .oval { margin-left: auto; font-variant-numeric: tabular-nums; font-size: 14.5px; }
+.orow.h1 { background: color-mix(in srgb, var(--accent) 11%, var(--panel)); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+.orow.h2 { background: color-mix(in srgb, var(--accent) 5%, var(--panel)); }
+.orow.h4 { opacity: .62; }
+
+/* 3連単：1着ごとの6列 */
+.tri-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 4px; }
+.tri-grid { display: grid; grid-template-columns: repeat(6, minmax(122px, 1fr)); gap: 8px; min-width: 760px; }
+.tri-col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.tri-head { display: flex; align-items: center; gap: 6px; padding: 8px 9px; background: var(--panel-2);
+  position: sticky; top: 0; font-weight: 700; }
+.tri-head span { font-size: 11px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tri-sub { display: flex; align-items: center; gap: 5px; padding: 5px 9px 3px; font-size: 11px; color: var(--ink-2);
+  border-top: 1px solid var(--line); }
+.tri-cell { display: flex; align-items: center; gap: 6px; padding: 3px 9px; font-variant-numeric: tabular-nums; }
+.tri-cell b { margin-left: auto; font-size: 13px; font-weight: 700; }
+.tri-cell.h1 { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+.tri-cell.h1 b { color: var(--accent-strong, var(--accent)); }
+.tri-cell.h2 { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.tri-cell.h4 { opacity: .55; }
+
+@media (max-width: 719px) {
+  .odds-rank { grid-template-columns: 1fr 1fr; }
+  .orow { padding: 7px 8px; gap: 5px; }
+  .orow .oval { font-size: 13.5px; }
+  .tri-grid { grid-template-columns: repeat(6, 128px); min-width: 0; }
 }
