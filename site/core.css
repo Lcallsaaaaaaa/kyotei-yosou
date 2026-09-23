@@ -1,0 +1,203 @@
+/* ボートレース研究所 ― 共通ファイル（core.css）
+   ============================================================
+   ★このファイルは GPT が書き換えない場所です。触らないでください。
+     画面の見た目（色・文字・余白・トップの作り）は style.css 側で自由に変えられます。
+     ここにあるのは「消えると機能が壊れる」ものだけです。
+       ・会員（合言葉）の案内と入力欄
+       ・オッズの表示（枠番の色チップ・オッズの濃さ・3連単の6列）
+       ・選手の全一覧、フッターのリンク、「本文へ移動」
+       ・トップの動物キャラ
+   ★色はすべて style.css の :root の変数（--accent など）を見ています。
+     style.css で色を変えれば、ここも自動でついてきます。
+   ★読み込み順：index.html で style.css → core.css の順。あとから読むので、
+     同じ指定があればこちらが勝ちます。
+   （2026-09-23：style.css を古い控えから作り直した際に、ここの指定が
+     まるごと消える事故があったため分離しました）
+   ============================================================ */
+
+/* ---------- 会員（合言葉） ---------- */
+.lock { margin: 12px 0; border-left: 4px solid var(--signal); }
+.lock b { display: block; font-size: 15px; }
+.lock p { margin: 8px 0 0; font-size: 13.5px; color: var(--ink-2); }
+.cta.ghost { background: none; color: var(--accent); border: 1.5px solid var(--accent); }
+.mem-form { display: flex; gap: 8px; margin-top: 6px; }
+.mem-form input { flex: 1; min-width: 0; font: inherit; font-size: 17px; letter-spacing: .06em; text-transform: uppercase;
+  padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink); }
+.aipick { margin-top: 12px; border-left: 4px solid var(--signal); }
+.aipick b { font-size: 15px; margin-right: 8px; }
+.picks { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.combo { display: flex; align-items: center; gap: 6px; background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 10px; padding: 8px 12px; }
+.combo small { color: var(--ink-2); font-size: 12px; }
+.rc.member::after { content: 'AI予想'; display: block; font-size: 9.5px; font-weight: 700; color: var(--signal); }
+@media (max-width: 719px) {
+  .picks { gap: 8px; }
+  .combo { padding: 8px 10px; }
+  .mem-form input { font-size: 16px; }
+}
+
+/* ---------- 読み上げ・キーボードの人向け ---------- */
+.skip { position: absolute; left: -9999px; top: 0; z-index: 100; background: var(--accent); color: #fff;
+  padding: 10px 16px; border-radius: 0 0 10px 0; font-weight: 700; text-decoration: none; }
+.skip:focus { left: 0; }
+
+/* ---------- フッターのリンク ---------- */
+.foot-nav { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 14px 0 6px; }
+.foot-nav a { color: var(--ink-2); text-decoration: underline; }
+
+/* ---------- 選手の全一覧 ---------- */
+.namelist { line-height: 2.1; font-size: 14px; margin: 0 0 6px; }
+.namelist a { text-decoration: none; }
+.namelist a:hover { text-decoration: underline; }
+
+
+/* ---------- オッズ（2026-09-23 に作り直し） ----------
+   数字の羅列をやめ、枠番の色と「オッズの濃さ」で読めるようにした。
+   h1〜h4 は安い順の4段階。色は accent（人気）から ink-2（薄い）へ。 */
+.wkm { display: inline-grid; place-items: center; width: 19px; height: 19px; border-radius: 5px;
+  font-size: 11.5px; font-weight: 700; font-style: normal; }
+.wkm.w1 { background: #fff; color: #111; box-shadow: inset 0 0 0 1.5px #9aa7a6; }
+.wkm.w2 { background: #1b1b1b; color: #fff; } .wkm.w3 { background: #d8322b; color: #fff; }
+.wkm.w4 { background: #1f5fbf; color: #fff; } .wkm.w5 { background: #f2c500; color: #111; }
+.wkm.w6 { background: #179a4b; color: #fff; }
+
+.odds-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 10px 0 4px; }
+.okey { font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px; }
+.okey.h1, .h1 .oval, .oval.h1 { color: var(--accent-strong, var(--accent)); }
+.okey.h1 { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.okey.h2 { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
+.okey.h3 { background: var(--panel-2); color: var(--ink-2); }
+.okey.h4 { background: var(--panel-2); color: var(--ink-2); opacity: .7; }
+
+/* 人気順の並び（3連複・2連単・2連複） */
+.odds-rank { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 6px; }
+.orow { display: flex; align-items: center; gap: 7px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; padding: 7px 10px; }
+.orow .opop { min-width: 20px; font-size: 11px; font-weight: 700; color: var(--ink-2); text-align: right; }
+.orow .ocmb { display: inline-flex; gap: 2px; }
+.orow .oval { margin-left: auto; font-variant-numeric: tabular-nums; font-size: 14.5px; }
+.orow.h1 { background: color-mix(in srgb, var(--accent) 11%, var(--panel)); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+.orow.h2 { background: color-mix(in srgb, var(--accent) 5%, var(--panel)); }
+.orow.h4 { opacity: .62; }
+
+/* 3連単：1着ごとの6列 */
+.tri-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 4px; }
+.tri-grid { display: grid; grid-template-columns: repeat(6, minmax(122px, 1fr)); gap: 8px; min-width: 760px; }
+.tri-col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.tri-head { display: flex; align-items: center; gap: 6px; padding: 8px 9px; background: var(--panel-2);
+  position: sticky; top: 0; font-weight: 700; }
+.tri-head span { font-size: 11px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tri-sub { display: flex; align-items: center; gap: 5px; padding: 5px 9px 3px; font-size: 11px; color: var(--ink-2);
+  border-top: 1px solid var(--line); }
+.tri-cell { display: flex; align-items: center; gap: 6px; padding: 3px 9px; font-variant-numeric: tabular-nums; }
+.tri-cell b { margin-left: auto; font-size: 13px; font-weight: 700; }
+.tri-cell.h1 { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+.tri-cell.h1 b { color: var(--accent-strong, var(--accent)); }
+.tri-cell.h2 { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.tri-cell.h4 { opacity: .55; }
+
+@media (max-width: 719px) {
+  .odds-rank { grid-template-columns: 1fr 1fr; }
+  .orow { padding: 7px 8px; gap: 5px; }
+  .orow .oval { font-size: 13.5px; }
+  .tri-grid { grid-template-columns: repeat(6, 128px); min-width: 0; }
+
+/* ---------- 凪の左に動物キャラを置く（2026-09-23・本人指示） ----------
+   .hero::before は波、.hero::after は凪のキャラで埋まっているので、
+   app.js に <span class="hero-crew"> を1つ足して、そこへ絵を入れている。
+   ページ全体の薄い透かし（body::before）はそのまま。 */
+.hero-crew {
+  position: absolute;
+  z-index: 0;
+  left: auto;
+  right: min(26vw, 300px);
+  bottom: -6px;
+  width: min(22vw, 250px);
+  height: min(14vw, 160px);
+  background: url('/assets/hero-mascots-boat.webp') left bottom / contain no-repeat;
+  filter: drop-shadow(0 10px 14px rgba(1, 40, 54, .14));
+  pointer-events: none;
+}
+.hero-eyebrow, .hero h1, .hero-lead, .hero-stats { position: relative; z-index: 1; }
+
+@media (max-width: 719px) {
+  .hero-crew { left: 4px; right: auto; bottom: 2px; width: 182px; height: 112px; }
+  .hero::after { right: -6px; width: 188px; height: 196px; }
+}
+@media (max-width: 390px) {
+  .hero-crew { left: 0; width: 162px; height: 100px; }
+  .hero::after { width: 170px; height: 180px; }
+}
+
+/* タイトルを「研究所」の顔としてまとめるブランドプレート */
+.hero-copy {
+  position: relative;
+  z-index: 2;
+  max-width: 590px;
+  margin: -9px 0 4px;
+  padding: 15px 18px 17px;
+  border: 1px solid rgba(143, 205, 216, .68);
+  border-radius: 22px;
+  background: linear-gradient(135deg, rgba(255,255,255,.94), rgba(245,253,254,.78));
+  box-shadow: 0 12px 30px rgba(8, 92, 112, .1), inset 0 1px 0 rgba(255,255,255,.9);
+  backdrop-filter: blur(8px);
+}
+.hero-brandline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 2px;
+}
+.hero-emblem {
+  width: 48px;
+  height: 48px;
+  flex: none;
+  object-fit: contain;
+  filter: drop-shadow(0 5px 8px rgba(8, 127, 156, .16));
+}
+.hero-copy .hero-eyebrow {
+  width: fit-content;
+  margin: 0;
+  padding: 5px 11px;
+  border: 1px solid rgba(8, 127, 156, .19);
+  border-radius: 999px;
+  background: rgba(223, 243, 246, .75);
+}
+.hero-copy h1 {
+  max-width: none;
+  margin: 2px 0 9px;
+  line-height: 1.18;
+}
+.hero-copy h1::after {
+  content: '';
+  display: block;
+  width: 92px;
+  height: 4px;
+  margin-top: 9px;
+  border-radius: 99px;
+  background: linear-gradient(90deg, var(--accent), #58cbd5 72%, transparent);
+}
+.hero-copy .hero-lead {
+  max-width: 40em;
+  margin: 0;
+  line-height: 1.75;
+}
+
+@media (max-width: 719px) {
+  .hero-copy {
+    margin: -7px 0 3px;
+    padding: 13px 14px 15px;
+    border-radius: 18px;
+  }
+  .hero-brandline { gap: 7px; }
+  .hero-emblem { width: 39px; height: 39px; }
+  .hero-copy .hero-eyebrow { padding: 4px 9px; font-size: 11.5px; letter-spacing: .08em; }
+  .hero-copy h1 { font-size: 27px; margin-top: 5px; }
+  .hero-copy h1::after { width: 72px; height: 3px; margin-top: 7px; }
+  .hero-copy .hero-lead { font-size: 13.5px; line-height: 1.7; }
+}
+
+@media (max-width: 390px) {
+  .hero-copy h1 { font-size: 25px; }
+}
+

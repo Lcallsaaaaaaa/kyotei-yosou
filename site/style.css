@@ -191,6 +191,20 @@ h3 { font-size: 14px; margin: 10px 0 6px; color: var(--ink-2); }
     min-height: 58px; font: inherit; font-size: 10.5px; font-weight: 700; color: var(--ink-2); text-decoration: none;
     background: none; border: 0; cursor: pointer; }
   .tabbar svg { width: 23px; height: 23px; }
+  .nav-icon {
+    display: block;
+    width: 26px;
+    height: 26px;
+    flex: none;
+    background: currentColor;
+    -webkit-mask: var(--nav-icon) center / contain no-repeat;
+    mask: var(--nav-icon) center / contain no-repeat;
+  }
+  .icon-home { --nav-icon: url('/assets/nav-home.svg'); }
+  .icon-prediction { --nav-icon: url('/assets/nav-prediction.svg'); }
+  .icon-news { --nav-icon: url('/assets/nav-news.svg'); }
+  .icon-racer { --nav-icon: url('/assets/nav-racer.svg'); }
+  .icon-more { --nav-icon: url('/assets/nav-more.svg'); }
   .tabbar .on { color: var(--accent); }
   .more:not([hidden]) { display: grid; position: fixed; right: 10px; bottom: calc(66px + env(safe-area-inset-bottom)); z-index: 21;
     background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 8px 30px rgba(20, 35, 43, .18); min-width: 190px; overflow: hidden; }
@@ -224,41 +238,6 @@ h3 { font-size: 14px; margin: 10px 0 6px; color: var(--ink-2); }
   .km { grid-template-columns: 6.5em 1fr 3.3em; }
   .foot { padding-bottom: 20px; }
 }
-
-/* ---------- 会員（合言葉） ---------- */
-.lock { margin: 12px 0; border-left: 4px solid var(--signal); }
-.lock b { display: block; font-size: 15px; }
-.lock p { margin: 8px 0 0; font-size: 13.5px; color: var(--ink-2); }
-.cta.ghost { background: none; color: var(--accent); border: 1.5px solid var(--accent); }
-.mem-form { display: flex; gap: 8px; margin-top: 6px; }
-.mem-form input { flex: 1; min-width: 0; font: inherit; font-size: 17px; letter-spacing: .06em; text-transform: uppercase;
-  padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink); }
-.aipick { margin-top: 12px; border-left: 4px solid var(--signal); }
-.aipick b { font-size: 15px; margin-right: 8px; }
-.picks { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
-.combo { display: flex; align-items: center; gap: 6px; background: var(--panel-2); border: 1px solid var(--line);
-  border-radius: 10px; padding: 8px 12px; }
-.combo small { color: var(--ink-2); font-size: 12px; }
-.rc.member::after { content: 'AI予想'; display: block; font-size: 9.5px; font-weight: 700; color: var(--signal); }
-@media (max-width: 719px) {
-  .picks { gap: 8px; }
-  .combo { padding: 8px 10px; }
-  .mem-form input { font-size: 16px; }
-}
-
-/* ---------- 読み上げ・キーボードの人向け ---------- */
-.skip { position: absolute; left: -9999px; top: 0; z-index: 100; background: var(--accent); color: #fff;
-  padding: 10px 16px; border-radius: 0 0 10px 0; font-weight: 700; text-decoration: none; }
-.skip:focus { left: 0; }
-
-/* ---------- フッターのリンク ---------- */
-.foot-nav { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 14px 0 6px; }
-.foot-nav a { color: var(--ink-2); text-decoration: underline; }
-
-/* ---------- 選手の全一覧 ---------- */
-.namelist { line-height: 2.1; font-size: 14px; margin: 0 0 6px; }
-.namelist a { text-decoration: none; }
-.namelist a:hover { text-decoration: underline; }
 
 /* ---------- トップの顔 ---------- */
 .hero { background: linear-gradient(160deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 72%, #06262a) 100%);
@@ -698,92 +677,133 @@ body {
   .tabs { background: rgba(245, 250, 251, .97); }
 }
 
-/* ---------- オッズ（2026-09-23 に作り直し） ----------
-   数字の羅列をやめ、枠番の色と「オッズの濃さ」で読めるようにした。
-   h1〜h4 は安い順の4段階。色は accent（人気）から ink-2（薄い）へ。 */
-.wkm { display: inline-grid; place-items: center; width: 19px; height: 19px; border-radius: 5px;
-  font-size: 11.5px; font-weight: 700; font-style: normal; }
-.wkm.w1 { background: #fff; color: #111; box-shadow: inset 0 0 0 1.5px #9aa7a6; }
-.wkm.w2 { background: #1b1b1b; color: #fff; } .wkm.w3 { background: #d8322b; color: #fff; }
-.wkm.w4 { background: #1f5fbf; color: #fff; } .wkm.w5 { background: #f2c500; color: #111; }
-.wkm.w6 { background: #179a4b; color: #fff; }
-
-.odds-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 10px 0 4px; }
-.okey { font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px; }
-.okey.h1, .h1 .oval, .oval.h1 { color: var(--accent-strong, var(--accent)); }
-.okey.h1 { background: color-mix(in srgb, var(--accent) 22%, transparent); }
-.okey.h2 { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
-.okey.h3 { background: var(--panel-2); color: var(--ink-2); }
-.okey.h4 { background: var(--panel-2); color: var(--ink-2); opacity: .7; }
-
-/* 人気順の並び（3連複・2連単・2連複） */
-.odds-rank { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 6px; }
-.orow { display: flex; align-items: center; gap: 7px; background: var(--panel); border: 1px solid var(--line);
-  border-radius: 10px; padding: 7px 10px; }
-.orow .opop { min-width: 20px; font-size: 11px; font-weight: 700; color: var(--ink-2); text-align: right; }
-.orow .ocmb { display: inline-flex; gap: 2px; }
-.orow .oval { margin-left: auto; font-variant-numeric: tabular-nums; font-size: 14.5px; }
-.orow.h1 { background: color-mix(in srgb, var(--accent) 11%, var(--panel)); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
-.orow.h2 { background: color-mix(in srgb, var(--accent) 5%, var(--panel)); }
-.orow.h4 { opacity: .62; }
-
-/* 3連単：1着ごとの6列 */
-.tri-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 4px; }
-.tri-grid { display: grid; grid-template-columns: repeat(6, minmax(122px, 1fr)); gap: 8px; min-width: 760px; }
-.tri-col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
-.tri-head { display: flex; align-items: center; gap: 6px; padding: 8px 9px; background: var(--panel-2);
-  position: sticky; top: 0; font-weight: 700; }
-.tri-head span { font-size: 11px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tri-sub { display: flex; align-items: center; gap: 5px; padding: 5px 9px 3px; font-size: 11px; color: var(--ink-2);
-  border-top: 1px solid var(--line); }
-.tri-cell { display: flex; align-items: center; gap: 6px; padding: 3px 9px; font-variant-numeric: tabular-nums; }
-.tri-cell b { margin-left: auto; font-size: 13px; font-weight: 700; }
-.tri-cell.h1 { background: color-mix(in srgb, var(--accent) 15%, transparent); }
-.tri-cell.h1 b { color: var(--accent-strong, var(--accent)); }
-.tri-cell.h2 { background: color-mix(in srgb, var(--accent) 7%, transparent); }
-.tri-cell.h4 { opacity: .55; }
-
-@media (max-width: 719px) {
-  .odds-rank { grid-template-columns: 1fr 1fr; }
-  .orow { padding: 7px 8px; gap: 5px; }
-  .orow .oval { font-size: 13.5px; }
-  .tri-grid { grid-template-columns: repeat(6, 128px); min-width: 0; }
+/* トップの余白：ねことペンギンがボートで案内 */
+.hero { padding-right: min(46vw, 560px); }
+.hero::after {
+  right: clamp(12px, 3vw, 34px);
+  bottom: 12px;
+  width: min(44vw, 520px);
+  height: min(29vw, 340px);
+  background-image: url('/assets/hero-mascots-boat.webp');
+  filter: drop-shadow(0 13px 18px rgba(8, 92, 112, .16));
 }
 
-/* ---------- スマホのヒーローを正方形くらいに（2026-09-23） ----------
-   もとは 375×548（縦1.46倍）。マスコットのために下へ190pxの余白を取っていたのが主因。
-   マスコットを「下」から「右上」に移し、余白は横方向で取る。
-   本文（見出し・リード）だけ右を空け、数字のカードは負のマージンで全幅に戻している。 */
 @media (max-width: 719px) {
   .hero {
-    min-height: 0;
-    padding: 22px 120px 16px 18px;
+    min-height: 570px;
+    padding: 25px 18px 228px;
   }
-  .hero::after {                 /* マスコット：下 → 右上へ */
-    top: 6px;
-    right: -6px;
-    bottom: auto;
-    width: 126px;
-    height: 148px;
-    background-position: center top;
+  .hero::after {
+    right: 4px;
+    bottom: 10px;
+    width: min(92vw, 355px);
+    height: 225px;
   }
-  .hero-eyebrow { font-size: 11.5px; letter-spacing: .08em; margin-bottom: 4px; }
-  .hero h1 { font-size: 25px; max-width: none; margin-bottom: 7px; }
-  .hero-lead { font-size: 13px; line-height: 1.7; }
-  .hero-stats {
-    margin-right: -102px;        /* 数字のカードだけ全幅に戻す */
-    grid-template-columns: repeat(2, 1fr);
-    gap: 7px;
-    margin-top: 13px;
-  }
-  .hero-stats > div { padding: 8px 10px; }
-  .hero-stats b { font-size: 20px; }
-  .hero-stats span { font-size: 10.5px; }
-  .hero-stats small { font-size: 9.5px; margin-top: 0; }
 }
+
 @media (max-width: 390px) {
-  .hero { min-height: 0; padding-right: 112px; }
-  .hero::after { width: 118px; height: 138px; }
-  .hero h1 { font-size: 23px; }
-  .hero-stats { margin-right: -94px; }
+  .hero { min-height: 590px; }
+  .hero::after { width: 340px; height: 215px; }
+}
+
+/* トップの数値：自動送り＋指で横スワイプできるカルーセル */
+.hero-stats {
+  display: flex;
+  max-width: 540px;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scroll-behavior: smooth;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  padding: 2px 34px 8px 1px;
+  -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 24px), transparent 100%);
+  mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 24px), transparent 100%);
+}
+.hero-stats::-webkit-scrollbar { display: none; }
+.hero-stats > div {
+  flex: 0 0 clamp(136px, 29%, 158px);
+  min-height: 82px;
+  scroll-snap-align: start;
+}
+.hero-stats:focus-visible {
+  outline: 3px solid rgba(8, 127, 156, .28);
+  outline-offset: 4px;
+  border-radius: 16px;
+}
+
+@media (max-width: 719px) {
+  .hero-stats {
+    width: 100%;
+    max-width: none;
+    padding-right: 42px;
+  }
+  .hero-stats > div {
+    flex-basis: min(44vw, 154px);
+    min-height: 94px;
+    padding: 12px 11px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-stats { scroll-behavior: auto; }
+}
+
+/* 動物キャラはページ全体の薄い透かしにし、トップは凪のキャラへ戻す */
+body { position: relative; }
+body::before {
+  content: '';
+  position: fixed;
+  z-index: 0;
+  inset: 70px 0 0;
+  pointer-events: none;
+  background: url('/assets/hero-mascots-boat.webp') calc(100% + 55px) 74% / min(54vw, 640px) auto no-repeat;
+  opacity: .045;
+}
+main,
+.foot { position: relative; z-index: 1; }
+
+.hero {
+  min-height: 300px;
+  padding: 38px min(34vw, 390px) 30px 34px;
+}
+.hero::after {
+  right: clamp(8px, 4vw, 44px);
+  bottom: -8px;
+  width: min(33vw, 350px);
+  height: min(31vw, 330px);
+  background: url('/assets/nagi-mascot.webp') center bottom / contain no-repeat;
+  opacity: 1;
+  filter: drop-shadow(0 12px 16px rgba(1, 40, 54, .18));
+}
+
+:root[data-theme="dark"] body::before { opacity: .025; }
+:root[data-theme="dark"] .hero::after { opacity: 1; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) body::before { opacity: .04; }
+  :root:not([data-theme="light"]) .hero::after { opacity: 1; }
+}
+
+@media (max-width: 719px) {
+  body::before {
+    top: 60px;
+    background-position: calc(100% + 38px) 72%;
+    background-size: min(108vw, 480px) auto;
+    opacity: .05;
+  }
+  .hero {
+    min-height: 410px;
+    padding: 25px 18px 190px;
+  }
+  .hero::after {
+    right: -2px;
+    bottom: -14px;
+    width: 210px;
+    height: 215px;
+  }
+}
+
+@media (max-width: 390px) {
+  .hero { min-height: 430px; padding: 25px 18px 190px; }
+  .hero::after { width: 185px; height: 195px; }
 }

@@ -129,10 +129,48 @@
     })
     const m = document.getElementById('more'); if (m) { m.hidden = true; document.querySelector('.more-btn')?.setAttribute('aria-expanded', 'false') }
   }
+  let heroStatsTimer = 0
+  let heroStatsResumeTimer = 0
+  function setupHeroStatsSlider() {
+    const slider = document.querySelector('.hero-stats')
+    if (!slider || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const cards = [...slider.children]
+    if (cards.length < 2) return
+
+    const stop = () => clearInterval(heroStatsTimer)
+    const start = () => {
+      stop()
+      heroStatsTimer = setInterval(() => {
+        if (!document.contains(slider)) return stop()
+        const nearest = cards.reduce((best, card, i) =>
+          Math.abs(card.offsetLeft - slider.offsetLeft - slider.scrollLeft) < best.distance
+            ? { index: i, distance: Math.abs(card.offsetLeft - slider.offsetLeft - slider.scrollLeft) }
+            : best, { index: 0, distance: Infinity }).index
+        const next = (nearest + 1) % cards.length
+        slider.scrollTo({ left: next ? cards[next].offsetLeft - slider.offsetLeft : 0, behavior: 'smooth' })
+      }, 3400)
+    }
+    const resumeLater = () => {
+      clearTimeout(heroStatsResumeTimer)
+      heroStatsResumeTimer = setTimeout(start, 5000)
+    }
+
+    slider.addEventListener('pointerenter', stop)
+    slider.addEventListener('pointerleave', start)
+    slider.addEventListener('focusin', stop)
+    slider.addEventListener('focusout', start)
+    slider.addEventListener('touchstart', stop, { passive: true })
+    slider.addEventListener('touchend', resumeLater, { passive: true })
+    start()
+  }
+
   const view = (html) => {
+    clearInterval(heroStatsTimer)
+    clearTimeout(heroStatsResumeTimer)
     app.innerHTML = html
     window.scrollTo(0, 0)
     if (moved) { app.focus({ preventScroll: true }); moved = false }   // 読み上げの人に「新しいページ」だと伝える
+    requestAnimationFrame(setupHeroStatsSlider)
   }
   let moved = false
 
@@ -277,16 +315,20 @@
     const RS = isToday ? await doc('results/30') : null
     const fw = RS?.total?.free_win
     const hero = isToday ? `<section class="hero">
-      <p class="hero-eyebrow">凪X演算分析×AI</p>
-      <h1>${esc(SITE)}</h1>
-      <p class="hero-lead">全国24場の出走表・直前情報・オッズ・結果を、見やすくひとつに。
-        AIの1着確率と、外れた日も含む実績をそのまま公開しています。</p>
-      <div class="hero-stats">
+      <div class="hero-copy">
+        <div class="hero-brandline"><img class="hero-emblem" src="/assets/hero-analysis-emblem.webp" alt="" width="50" height="50">
+          <p class="hero-eyebrow">凪X演算分析×AI</p></div>
+        <h1>${esc(SITE)}</h1>
+        <p class="hero-lead">全国24場の出走表・直前情報・オッズ・結果を、見やすくひとつに。
+          AIの1着確率と、外れた日も含む実績をそのまま公開しています。</p>
+      </div>
+      <div class="hero-stats" aria-label="本日の概要。横にスライドできます" tabindex="0">
         <div><b>${byV.size}</b><span>きょうの開催場</span></div>
         <div><b>${j.races.length}</b><span>きょうのレース</span></div>
         <div><b>${free.length}</b><span>無料予想</span></div>
         ${fw ? `<div><b>${fw.hit_rate}%</b><span>無料予想の的中率<small>直近30日・回収率${fw.return_rate}%</small></span></div>` : ''}
-      </div></section>` : `<h1>出走表 <span class="sub">${md(date)}(${wd(date)})・${byV.size}場 ${j.races.length}レース</span></h1>`
+      </div>
+      <span class="hero-crew" aria-hidden="true"></span></section>` : `<h1>出走表 <span class="sub">${md(date)}(${wd(date)})・${byV.size}場 ${j.races.length}レース</span></h1>`
 
     // ---- 次に締め切るレース ----
     const nx = nextId ? j.races.find((r) => r.race_id === nextId) : null
