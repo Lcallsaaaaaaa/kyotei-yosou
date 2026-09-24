@@ -63,8 +63,12 @@ function page({ path, title, desc, body, ld, article }) {
 
 let written = 0
 const wrote = new Set()
+// ★「<パス>.html」で置く（2026-09-24に変更）
+//   前は <パス>/index.html にしていたが、Cloudflare Pages は /race/x を /race/x/ へ
+//   **308でリダイレクト**してしまい、canonical（末尾スラッシュ無し）と食い違っていた。
+//   .html で置けばリダイレクトなしでそのまま返る。
 function out(path, html) {
-  const rel = path === '/' ? 'index.html' : join(path.replace(/^\//, ''), 'index.html')
+  const rel = path === '/' ? 'index.html' : path.replace(/^\//, '') + '.html'
   const f = join(SITE, rel)
   mkdirSync(dirname(f), { recursive: true })
   writeFileSync(f, html)
@@ -218,12 +222,27 @@ const sweep = (dir) => {
   if (!existsSync(abs)) return
   for (const name of readdirSync(abs)) {
     const p = join(abs, name)
-    if (!statSync(p).isDirectory()) continue
-    const rel = `${dir}/${name}/index.html`
-    if (!wrote.has(rel)) { rmSync(p, { recursive: true, force: true }); removed++ }
+    // 前の作り（<パス>/index.html）で残ったフォルダは、まるごと片づける
+    if (statSync(p).isDirectory()) { rmSync(p, { recursive: true, force: true }); removed++; continue }
+    if (!name.endsWith('.html')) continue
+    if (!wrote.has(`${dir}/${name}`)) { rmSync(p, { force: true }); removed++ }
   }
 }
-for (const d of ['race', 'racer', 'd']) sweep(d)
+for (const d of ['race', 'racer', 'd', 'news', 'venue', 'analysis', 'racers']) sweep(d)
+
+// 前の作り（<パス>/index.html）の残りを全部消す。
+// いまは site/index.html だけが index.html で、ほかは <パス>.html。
+// 残っていると Pages が /about → /about/ へ308で飛ばしてしまう。
+const KEEP_DIR = new Set(['_local', 'assets', 'functions'])
+const purge = (dir) => {
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name)
+    if (dir === SITE && KEEP_DIR.has(name)) continue
+    if (statSync(p).isDirectory()) { purge(p); try { if (!readdirSync(p).length) rmSync(p, { recursive: true }) } catch {} }
+    else if (name === 'index.html' && dir !== SITE) { rmSync(p, { force: true }); removed++ }
+  }
+}
+purge(SITE)
 
 console.log(`HTMLを ${written} ページ書き出し、古いものを ${removed} ページ片づけました`)
 if (!BASE) console.log('⚠ site/config.js の siteUrl が空なので、canonical と og:url は入れていません')
