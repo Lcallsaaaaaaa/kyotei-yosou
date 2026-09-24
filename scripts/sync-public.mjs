@@ -20,6 +20,7 @@ import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { apiRoute } from './api.mjs'
 import { seal, isSealed, periodOf, phraseOf, open as unseal } from './seal.mjs'
+import { r2Config, putObject, deleteObject } from './r2.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const argv = process.argv.slice(2)
@@ -33,13 +34,22 @@ const addDays = (d, n) => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const log = (...a) => console.log(jst().toISOString().slice(11, 16), ...a)
 
-// ---------- 接続情報 ----------
-let CFG = null
+// ---------- 送り先 ----------
+// data/r2.json があれば Cloudflare R2、無ければ data/supabase.json（Supabase）。
+// R2 を本命にした理由（2026-09-24）：Supabase の無料枠は**送信5GB/月で全サービスが止まる**。
+// データ44MBなので月1,000〜2,500人で頭打ちになる。R2 は送信が永久に無料。
+let CFG = null, R2 = null
 if (!LOCAL) {
-  const f = join(ROOT, 'data', 'supabase.json')
-  if (!existsSync(f)) { console.error('data/supabase.json がありません（{ "url": "https://xxx.supabase.co", "service_key": "..." }）。画面だけ試すなら --local'); process.exit(1) }
-  CFG = JSON.parse(readFileSync(f, 'utf8'))
-  if (!CFG.url || !CFG.service_key) { console.error('data/supabase.json に url と service_key が必要'); process.exit(1) }
+  R2 = r2Config()
+  if (!R2) {
+    const f = join(ROOT, 'data', 'supabase.json')
+    if (!existsSync(f)) {
+      console.error('送り先がありません。data/r2.json（推奨）か data/supabase.json を置いてください。画面だけ試すなら --local')
+      process.exit(1)
+    }
+    CFG = JSON.parse(readFileSync(f, 'utf8'))
+    if (!CFG.url || !CFG.service_key) { console.error('data/supabase.json に url と service_key が必要'); process.exit(1) }
+  }
 }
 
 // ---------- api.mjs の中身を受け取る ----------
@@ -122,6 +132,25 @@ async function putRaw(docs) {
     }
     if (LOCAL) { sent += todo.length; return }
   }
+  // Cloudflare R2 へ。1件＝1ファイル（race/20260924-01-01.json のような形）。
+  // 画面は Pages Functions 経由で同じドメインから読むので、CORS の設定が要らない。
+  if (R2) {
+    const LANES = 8   // 同時に8本。多すぎると弾かれ、少なすぎると2,000件に時間がかかる
+    let i = 0, fail = null
+    await Promise.all(Array.from({ length: LANES }, async () => {
+      for (;;) {
+        const d = todo[i++]
+        if (!d || fail) return
+        try { await putObject(R2, d.key + '.json', JSON.stringify(d.body)) }
+        catch (e) { fail = e; return }
+        state[d.key] = d.h
+        sent++
+      }
+    }))
+    if (fail) throw fail
+    writeFileSync(STATE, JSON.stringify(state))
+    return
+  }
   // Supabase（PostgREST）へ、同じ key なら上書きでまとめて送る
   for (let i = 0; i < todo.length; i += 50) {
     const chunk = todo.slice(i, i + 50)
@@ -180,6 +209,7 @@ async function removeOld(keepDates) {
     if (!m) continue
     const ymd = m[1].replace(/-/g, '')
     if (keep.has(ymd)) continue
+    if (R2) { await deleteObject(R2, k + '.json'); delete state[k]; continue }
     const res = await fetch(`${CFG.url}/rest/v1/docs?key=eq.${encodeURIComponent(k)}`, { method: 'DELETE',
       headers: { apikey: CFG.service_key, Authorization: `Bearer ${CFG.service_key}` } })
     if (res.ok) delete state[k]

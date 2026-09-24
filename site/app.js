@@ -12,6 +12,13 @@
   async function doc(key) {
     if (cache.has(key)) return cache.get(key)
     const p = (async () => {
+      // Cloudflare R2（本命）。同じドメインの /data/ から読むので CORS の設定が要らない。
+      if (C.mode === 'r2') {
+        const r = await fetch(`/data/${key}.json`)
+        if (r.status === 404) return null
+        if (!r.ok) throw new Error('データを読み込めませんでした（' + r.status + '）')
+        return r.json()
+      }
       if (C.mode === 'supabase') {
         const r = await fetch(`${C.supabaseUrl}/rest/v1/docs?key=eq.${encodeURIComponent(key)}&select=body`,
           { headers: { apikey: C.supabaseAnonKey, Authorization: `Bearer ${C.supabaseAnonKey}` } })

@@ -2,7 +2,9 @@
 //
 // mode:
 //   'local'    … このPCで試すとき。site/_local/ に書き出したデータを読む（node scripts/sync-public.mjs --local）
-//   'supabase' … 公開するとき。Supabase の docs 表を読む
+//   'r2'       … 公開するとき（本命）。同じドメインの /data/ から読む。中身は Cloudflare R2。
+//                 Pages の Settings → Functions → R2 bucket bindings で 変数名 DATA を割り当てること。
+//   'supabase' … Supabase の docs 表を読む（R2 に移す前の方式。いまは使わない）
 //
 // ⚠ ここに入れてよいのは anon（公開用・読むだけ）の鍵だけ。
 //   service_role の鍵は書き込みができる強い鍵なので、絶対にここへ入れない（data/supabase.json にだけ置く）。
