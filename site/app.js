@@ -322,15 +322,51 @@
     return `<div class="days">${dates.map((d) => `<a href="/${base}/${d}" class="${d === active ? 'on' : ''}">${md(d)}(${wd(d)})${d === jstToday() ? ' 今日' : ''}</a>`).join('')}</div>`
   }
 
+  // ---------- トップの共通部品 ----------
+  // データが無い日でも出す。以前は home() の中にあり、その日のレースが無いと
+  // まるごと消えていた（毎日0時〜朝のバッチが終わるまで、ほぼ空のページになっていた）。
+  const ENTRY = [
+    ['/tenkai', '展開予想', '全レースの本線・対抗と、逃げ／差し／まくりの確率'],
+    ['/analysis/average', 'データ分析', '全国24場のコース別成績・出目・優勝戦を1年ぶんで集計'],
+    ['/venues', '場情報・攻略', '場ごとの1コースの強さ、波・風・時間帯での変わり方'],
+    ['/racers', '選手データ', '1,600人超の勝率・コース別成績・平均ST・当地の成績'],
+    ['/schedule', '開催予定', 'SG・G1などグレードレースの日程と出場予定選手'],
+    ['/results', '的中実績', '締切前に出した予想だけを、外れた日も含めて集計'],
+  ]
+  const entryCards = () => `<h2>このサイトでできること</h2>
+    <div class="entry-cards">${ENTRY.map(([href, t, d]) =>
+      `<a href="${href}"><b>${t}</b><span>${d}</span></a>`).join('')}</div>`
+  const memberCta = () => `<div class="panel member-cta">
+    <b>全レースの展開予想とAI予想は会員の方に</b>
+    <p>月額300円。3連複2点プランと、全レースの展開予想、各レースの1着確率がご覧いただけます。</p>
+    <p><a class="cta" href="/member">会員について →</a></p></div>`
+  const emptyHero = () => `<section class="hero">
+    <p class="hero-eyebrow">凪X演算分析×AI</p>
+    <h1>${esc(SITE)}</h1>
+    <p class="hero-lead">全国24場の出走表・直前情報・オッズ・結果を、見やすくひとつに。
+      AIの1着確率と、外れた日も含む実績をそのまま公開しています。</p>
+    <span class="hero-crew" aria-hidden="true"></span></section>`
+
   // ---------- 出走表（トップ） ----------
   async function home(date) {
     setNav('home')
     date = date || jstToday()
     const tabs = await dayTabs(date, 'd')
     const j = await doc(`races/${date}`)
+    // その日のデータがまだ無いとき（毎日0時〜朝のバッチが終わるまでは必ずこの状態になる）。
+    // 以前はここで「出走表」の見出しと一行だけを出していたので、
+    // その時間に来た人には**ほぼ空のページ**に見えていた（2026-09-25に判明）。
+    // 顔と入口は残し、前の日へ誘導する。
     if (!j || j.status !== 'ok') {
-      meta(`${md(date)}の出走表`, `${date.replaceAll('-', '/')}のレースはまだありません。`, { noindex: true })
-      return view(`<h1>出走表</h1>${tabs}<p class="empty">${md(date)} のレースはまだありません。</p>`)
+      const isToday = date === jstToday()
+      meta(isToday ? `${SITE}｜競艇の出走表・展開予想・データ` : `${md(date)}の出走表`,
+        `${date.replaceAll('-', '/')}のレースはまだありません。`, { noindex: !isToday })
+      const prev = (await doc('meta'))?.dates?.filter((d) => d < date).at(-1)
+      return view(`${isToday ? emptyHero() : `<h1>${md(date)}の出走表</h1>`}
+        <div class="panel" style="margin-top:12px"><b>${md(date)}のレースはまだ出ていません</b>
+          <p class="sub">出走表は朝のうちに入ります。直前情報とオッズは、各レースの締切20分前から入ります。</p>
+          ${prev ? `<p><a class="cta" href="/d/${prev}">${md(prev)}のレースを見る</a></p>` : ''}</div>
+        ${tabs}${entryCards()}${memberCta()}`)
     }
     const byV = new Map()
     for (const r of j.races) { if (!byV.has(r.jcd)) byV.set(r.jcd, []); byV.get(r.jcd).push(r) }
@@ -435,22 +471,8 @@
       }).join('')}</div>
       <p class="note">買い目は100円換算です。当たらなかったぶんも消さずに<a href="/results">実績</a>に残しています。</p>` : ''
 
-    // ---- できること ----
-    const ENTRY = [
-      ['/tenkai', '展開予想', '全レースの本線・対抗と、逃げ／差し／まくりの確率'],
-      ['/analysis/average', 'データ分析', '全国24場のコース別成績・出目・優勝戦を1年ぶんで集計'],
-      ['/venues', '場情報・攻略', '場ごとの1コースの強さ、波・風・時間帯での変わり方'],
-      ['/racers', '選手データ', '1,600人超の勝率・コース別成績・平均ST・当地の成績'],
-      ['/schedule', '開催予定', 'SG・G1などグレードレースの日程と出場予定選手'],
-      ['/results', '的中実績', '締切前に出した予想だけを、外れた日も含めて集計'],
-    ]
-    const entries = isToday ? `<h2>このサイトでできること</h2>
-      <div class="entry-cards">${ENTRY.map(([href, t, d]) =>
-        `<a href="${href}"><b>${t}</b><span>${d}</span></a>`).join('')}</div>` : ''
-    const memberBox = isToday ? `<div class="panel member-cta">
-      <b>全レースの展開予想とAI予想は会員の方に</b>
-      <p>月額300円。3連複2点プランと、全レースの展開予想がご覧いただけます。</p>
-      <p><a class="cta" href="/member">会員について →</a></p></div>` : ''
+    const entries = isToday ? entryCards() : ''
+    const memberBox = isToday ? memberCta() : ''
 
     meta(isToday ? `${SITE}｜競艇の出走表・展開予想・データ` : `${md(date)}(${wd(date)})の出走表 全国${byV.size}場${j.races.length}レース`,
       isToday

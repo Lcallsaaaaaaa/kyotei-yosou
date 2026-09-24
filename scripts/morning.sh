@@ -82,7 +82,14 @@ if [ "$(date +%d)" -ge 25 ]; then
 fi
 
 echo ""
+echo "--- サイトを公開する（R2へ送信 → 静的HTML → 点検 → デプロイ）---"
+# これが無いと、予想ができてもサイトには何も出ない（2026-09-25に判明）。
+# 点検で止まったらデプロイしない作りなので、そのまま呼んでよい。
+bash scripts/publish.sh 2>&1 | tail -12
+
+echo ""
 echo "=== 完了 $(date +%H:%M:%S) ==="
+echo "  サイト:        https://kyotei-site.pages.dev"
 echo "  見張り表:      http://localhost:3940/asa"
 echo "  配信用:        http://localhost:3940/haishin"
 echo "  配信の文面:    node scripts/haishin.mjs --date $TODAY --text"
