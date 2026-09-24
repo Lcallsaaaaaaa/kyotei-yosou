@@ -44,3 +44,8 @@ site/sitemap.xml
 
 # GPTがUIを直す前に取っている控え（履歴には入れない）
 backups/
+
+# prerender.mjs が書き出す静的HTML（毎回2,000ページ作り直す。デプロイ時に作る）
+site/*/index.html
+site/*/*/index.html
+site/*/*/*/index.html

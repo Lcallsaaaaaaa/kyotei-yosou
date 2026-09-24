@@ -24,6 +24,7 @@ import { seal, isSealed, periodOf, phraseOf, open as unseal } from './seal.mjs'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const argv = process.argv.slice(2)
 const LOCAL = argv.includes('--local'), LIVE = argv.includes('--live')
+const WRITE_LOCAL = LOCAL || argv.includes('--write-local')   // 送りつつ静的HTMLの材料も残す
 const OUT = join(ROOT, 'site', '_local')
 const STATE = join(ROOT, 'data', 'sync-public-state.json')   // 送った中身の指紋
 const jst = () => new Date(Date.now() + 9 * 3600e3)
@@ -112,13 +113,14 @@ async function putRaw(docs) {
     todo.push({ key, body, h })
   }
   if (!todo.length) return
-  if (LOCAL) {
+  // --once で送りつつ、静的HTML（prerender.mjs）の材料も残せるようにしてある。
+  // これが無いと「送る用」と「書き出す用」で2回まわすことになり、倍の時間がかかる。
+  if (WRITE_LOCAL) {
     for (const d of todo) {
       const f = join(OUT, d.key.replace(/\//g, '__') + '.json')
       mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, JSON.stringify(d.body))
-      sent++
     }
-    return
+    if (LOCAL) { sent += todo.length; return }
   }
   // Supabase（PostgREST）へ、同じ key なら上書きでまとめて送る
   for (let i = 0; i < todo.length; i += 50) {
