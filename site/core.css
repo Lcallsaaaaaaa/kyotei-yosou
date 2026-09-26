@@ -219,3 +219,15 @@
 .mem-form .eye { flex: none; font: inherit; font-size: 13px; font-weight: 700; padding: 0 14px;
   border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--ink-2); cursor: pointer; }
 .mem-form .eye:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ---------- メール登録・ログイン（2026-09-26） ---------- */
+.au-form { display: grid; gap: 4px; margin-top: 10px; }
+.au-form label { font-size: 12.5px; font-weight: 700; color: var(--ink-2); margin-top: 8px; }
+.au-form input { font: inherit; font-size: 16px; padding: 12px 14px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--ink); }
+.au-form input:focus { border-color: var(--accent); }
+/* ログイン中はナビの「登録」を「マイページ」に見せ替える。
+   ⚠ !important が要る。style.css 側の .top .nav a のほうが強く、
+   付けないと両方出てしまう（2026-09-26に実際そうなった）。 */
+body.signed-in .only-out { display: none !important; }
+body:not(.signed-in) .only-in { display: none !important; }

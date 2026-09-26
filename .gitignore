@@ -46,9 +46,11 @@ site/sitemap.xml
 backups/
 
 # prerender.mjs が書き出す静的HTML（毎回2,000ページ作り直す。デプロイ時に作る）
-site/*/index.html
-site/*/*/index.html
-site/*/*/*/index.html
+# ★2026-09-26：書き出し先を「<パス>/index.html」から「<パス>.html」に変えたとき、
+#   この除外が効かなくなって2,147ページが履歴に入っていた。
+#   手で書いているのは site/index.html だけ。ほかの .html は全部作り直せる。
+site/**/*.html
+!site/index.html
 
 # 公開用に組み立てたフォルダ（deploy.mjs が毎回作り直す）
 build/

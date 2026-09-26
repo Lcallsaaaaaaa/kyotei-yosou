@@ -94,6 +94,57 @@
     } catch { return null }
   }
   const paidDoc = async (key) => openBox(await doc(key))
+
+  // ---------- メール登録（無料） ----------
+  // 月300円の会員（合言葉）とは別のしくみ。Supabase の認証だけを使う。
+  // 無料枠（単勝1点）は member/ 置き場にあり、Pages Functions が本人確認してから返す。
+  // 画面だけで隠すのではなく、**置き場の手前で止めている**ので、URLを直接叩いても取れない。
+  const SESS = 'nagi_session'
+  const sbUrl = (C.supabaseUrl || '').replace(/\/+$/, '')
+  const sbKey = C.supabaseAnonKey || ''
+  const authOn = !!(sbUrl && sbKey)
+  const session = () => { try { return JSON.parse(localStorage.getItem(SESS) || 'null') } catch { return null } }
+  // ログイン中かどうかでナビの出し分けをする。
+  // ⚠ CSS の display で消そうとすると style.css 側の指定と取り合いになり、
+  //    キャッシュの絡みもあって確実に効かない（2026-09-26に実際に効かなかった）。
+  //    hidden 属性で直接つけ外しするほうが確実。
+  const applySignedIn = (on) => {
+    document.body.classList.toggle('signed-in', on)
+    document.querySelectorAll('.only-in').forEach((e) => { e.hidden = !on })
+    document.querySelectorAll('.only-out').forEach((e) => { e.hidden = on })
+  }
+  const setSession = (s) => {
+    try { s ? localStorage.setItem(SESS, JSON.stringify(s)) : localStorage.removeItem(SESS) } catch { /* 保存できなくても動く */ }
+    applySignedIn(!!s)
+  }
+  const sbFetch = (path, body, extra = {}) => fetch(sbUrl + path, {
+    method: 'POST', headers: { apikey: sbKey, 'Content-Type': 'application/json', ...extra },
+    body: JSON.stringify(body),
+  })
+  const saveFrom = (j) => {
+    if (!j?.access_token) return null
+    const s = { token: j.access_token, refresh: j.refresh_token,
+      expires: Date.now() + (j.expires_in ?? 3600) * 1000, email: j.user?.email ?? null }
+    setSession(s); return s
+  }
+  /** いまの入場券。期限が近ければ静かに取り直す。 */
+  async function accessToken() {
+    const s = session()
+    if (!s?.token) return null
+    if (s.expires - Date.now() > 60_000) return s.token
+    if (!s.refresh) { setSession(null); return null }
+    const j = await sbFetch('/auth/v1/token?grant_type=refresh_token', { refresh_token: s.refresh }).then((r) => r.json()).catch(() => null)
+    return saveFrom(j)?.token ?? (setSession(null), null)
+  }
+  /** メール登録した人向けのデータ。未登録なら null（画面側で案内を出す）。 */
+  async function memberDoc(key) {
+    const t = await accessToken()
+    if (!t) return null
+    const r = await fetch(`/data/${key}.json`, { headers: { Authorization: 'Bearer ' + t } })
+    if (r.status === 401) { setSession(null); return null }
+    return r.ok ? r.json() : null
+  }
+  const signedIn = () => !!session()?.token
   /** 有料のところに出す案内。date を渡すと、その月の会員かどうかも見る。 */
   function lockPanel(what, date) {
     const st = memberState()
@@ -460,16 +511,19 @@
       <span class="next-go">出走表を見る →</span></a>` : ''
 
     // ---- きょうの無料予想（単勝1点）----
-    const freeBox = isToday && free.length ? `<h2>きょうの無料予想 <span class="sub">単勝1点・1着確率80%以上の本命だけ</span></h2>
-      <div class="free-list">${free.map((r) => {
-        const f = r.free_pick
-        return `<a class="free-card${r.closed ? ' done' : ''}" href="/race/${r.race_id}">
-          <span class="free-head">${esc(r.venue ?? VENUES[r.jcd])}${r.race_no}R <span class="sub">${esc(r.deadline ?? '')}</span></span>
-          <span class="free-pick">${waku(f.lane)} <b>${esc(f.racer ?? '')}</b></span>
-          <span class="free-p">1着確率 ${pct(f.probability)}</span>
-          ${f.hit == null ? '' : f.hit ? `<span class="hit">的中 ${yen(f.payout)}</span>` : '<span class="miss">不的中</span>'}</a>`
-      }).join('')}</div>
-      <p class="note">買い目は100円換算です。当たらなかったぶんも消さずに<a href="/results">実績</a>に残しています。</p>` : ''
+    // 中身はメール登録した人だけ。置き場の手前（Pages Functions）で止めているので、
+    // ログインしていなければ URL を直接叩いても取れない。
+    const mem = free.length ? await memberDoc(`member/free/${date}`) : null
+    const picks = mem?.picks ?? []
+    const freeBox = !free.length ? '' : `<h2>きょうの無料予想 <span class="sub">単勝1点・1着確率80%以上の本命だけ・${free.length}本</span></h2>
+      ${picks.length ? `<div class="free-list">${picks.map((f) => `
+          <a class="free-card${f.closed ? ' done' : ''}" href="/race/${f.race_id}">
+            <span class="free-head">${esc(f.venue ?? VENUES[f.jcd])}${f.race_no}R <span class="sub">${esc(f.deadline ?? '')}</span></span>
+            <span class="free-pick">${waku(f.lane)} <b>${esc(f.racer ?? '')}</b></span>
+            <span class="free-p">1着確率 ${pct(f.win_probability)}</span>
+            ${f.hit == null ? '' : f.hit ? `<span class="hit">的中 ${yen(f.payout)}</span>` : '<span class="miss">不的中</span>'}</a>`).join('')}</div>
+        <p class="note">買い目は100円換算です。当たらなかったぶんも消さずに<a href="/results">実績</a>に残しています。</p>`
+        : signupPanel(`きょうの無料予想${free.length}本`)}`
 
     const entries = isToday ? entryCards() : ''
     const memberBox = isToday ? memberCta() : ''
@@ -507,8 +561,12 @@
         location: { '@type': 'Place', name: `ボートレース${R.venue}` },
         competitor: (R.entries ?? []).map((e) => ({ '@type': 'Person', name: e.name })) } })
     const state = R.cancelled ? '<span class="badge gray">中止・順延</span>' : R.result ? '<span class="badge gray">確定</span>' : R.closed ? '<span class="badge gray">締切</span>' : ''
-    const free = R.free_pick ? `<div class="panel freepick"><b>無料予想</b>　単勝 ${waku(R.free_pick.lane)} ${esc(R.free_pick.racer ?? '')}（1着確率 ${pct(R.free_pick.probability)}）
-      ${R.free_pick.hit == null ? '' : R.free_pick.hit ? `<span class="hit">的中 ${yen(R.free_pick.payout)}</span>` : '<span class="miss">不的中</span>'}</div>` : ''
+    // 無料予想（単勝1点）はメール登録した人だけ。中身は member/ 側にある。
+    const fp = R.has_free_pick ? (await memberDoc(`member/free/${R.date}`))?.picks?.find((x) => x.race_id === id) : null
+    const free = !R.has_free_pick ? ''
+      : fp ? `<div class="panel freepick"><b>無料予想</b>　単勝 ${waku(fp.lane)} ${esc(fp.racer ?? '')}（1着確率 ${pct(fp.win_probability)}）
+        ${fp.hit == null ? '' : fp.hit ? `<span class="hit">的中 ${yen(fp.payout)}</span>` : '<span class="miss">不的中</span>'}</div>`
+      : signupPanel('このレースの無料予想')
     // 会員ぶん（展開予想・AI予想）。合言葉が入っていなければ開かないので null になる
     const paid = (R.member_only || R.has_member_picks || R.has_member_probs) ? await paidDoc(`paid/race/${id}`) : null
     const p2 = paid?.picks?.plan2
@@ -979,6 +1037,77 @@
       <p><a href="/news">← ニュース一覧へ</a></p></article>`)
   }
 
+  // ---------- メール登録・ログインの画面 ----------
+  /** 未登録の人に出す案内。 */
+  const signupPanel = (what) => `<div class="panel lock"><b>${esc(what)}は登録した方にお見せしています</b>
+    <p>メールアドレスの登録（無料）で、その日の無料予想がすべて見られます。
+      登録は1分で終わり、費用はかかりません。</p>
+    <p><a class="cta" href="/signup">無料で登録する</a>
+      <a class="cta ghost" href="/login">登録済みの方はこちら</a></p></div>`
+
+  async function authPage(kind) {
+    setNav('')
+    const isUp = kind === 'signup'
+    const title = isUp ? 'メールアドレスの登録（無料）' : 'ログイン'
+    meta(title, isUp
+      ? 'メールアドレスの登録（無料）で、その日の無料予想がすべて見られます。'
+      : '登録済みの方のログインページです。', { noindex: true })
+    if (!authOn) return view(`<h1>${title}</h1><p class="empty">いま登録を受け付けられません。時間をおいてお試しください。</p>`)
+    const s = session()
+    if (s) return view(`<h1>${title}</h1>
+      <div class="panel"><p><b>${esc(s.email ?? '')} でログインしています。</b></p>
+        <p class="sub">その日の無料予想は<a href="/">トップ</a>から見られます。</p>
+        <p><button type="button" class="cta ghost" id="au-out">ログアウト</button></p></div>`),
+      document.getElementById('au-out')?.addEventListener('click', () => { setSession(null); cache.clear(); navTo('/') })
+
+    view(`<h1>${title}</h1>
+      <div class="panel">
+        ${isUp ? `<p>メールアドレスの登録（無料）で、<b>その日の無料予想</b>がすべて見られます。</p>
+          <p class="sub">確認メールは送りません。登録するとすぐ使えます。</p>`
+        : '<p>登録に使ったメールアドレスとパスワードを入れてください。</p>'}
+        <div class="au-form">
+          <label for="au-mail">メールアドレス</label>
+          <input id="au-mail" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" placeholder="you@example.com">
+          <label for="au-pw">パスワード</label>
+          <input id="au-pw" type="password" autocomplete="${isUp ? 'new-password' : 'current-password'}" placeholder="${isUp ? '8文字以上' : ''}">
+        </div>
+        <p><button type="button" class="cta" id="au-go">${isUp ? '登録する' : 'ログインする'}</button></p>
+        <p id="au-msg" class="sub"></p>
+        <p class="sub">${isUp ? '登録済みの方は <a href="/login">ログイン</a>' : 'はじめての方は <a href="/signup">無料で登録</a>'}</p>
+      </div>
+      <p class="note">お預かりするのはメールアドレスだけです。使い道と消し方は
+        <a href="/privacy">プライバシーポリシー</a>に書いています。パスワードは Supabase 側で保管され、当サイトは見られません。</p>`)
+
+    const mail = document.getElementById('au-mail'), pw = document.getElementById('au-pw')
+    const go = document.getElementById('au-go'), msg = document.getElementById('au-msg')
+    const submit = async () => {
+      const email = (mail.value || '').trim(), pass = pw.value || ''
+      if (!email.includes('@')) { msg.textContent = 'メールアドレスをご確認ください。'; return }
+      if (isUp && pass.length < 8) { msg.textContent = 'パスワードは8文字以上にしてください。'; return }
+      if (!pass) { msg.textContent = 'パスワードを入れてください。'; return }
+      go.disabled = true; msg.textContent = isUp ? '登録しています…' : '確認しています…'
+      try {
+        const r = await sbFetch(isUp ? '/auth/v1/signup' : '/auth/v1/token?grant_type=password', { email, password: pass })
+        const j = await r.json()
+        if (!r.ok || !j.access_token) {
+          go.disabled = false
+          const m = String(j.msg || j.error_description || j.message || '')
+          msg.textContent = /already registered/i.test(m) ? 'このメールアドレスは登録済みです。ログインしてください。'
+            : /Invalid login/i.test(m) ? 'メールアドレスかパスワードが違います。'
+            : /Password should be/i.test(m) ? 'パスワードが短すぎます。8文字以上にしてください。'
+            : m || 'うまくいきませんでした。時間をおいてお試しください。'
+          return
+        }
+        saveFrom(j)
+        track(isUp ? 'signup' : 'login', {})
+        cache.clear()
+        navTo('/')
+      } catch (e) { go.disabled = false; msg.textContent = 'つながりませんでした（' + (e.message || e) + '）' }
+    }
+    go?.addEventListener('click', submit)
+    for (const el of [mail, pw]) el?.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit() })
+  }
+
   // ---------- 固定のページ（このサイトについて・プライバシーポリシー） ----------
   async function staticPage(slug) {
     setNav('')
@@ -1049,6 +1178,7 @@
       if (p[0] === 'meeting') return await meeting(Number(p[1]), p[2])
       if (p[0] === 'analysis') return await analysis(p[1])
       if (p[0] === 'member') return await memberPage()
+      if (p[0] === 'signup' || p[0] === 'login') return await authPage(p[0])
       if (p[0] === 'about' || p[0] === 'privacy') return await staticPage(p[0])
       return notFound()
     } catch (e) { fail(e) }
@@ -1059,5 +1189,6 @@
     e.currentTarget.setAttribute('aria-expanded', String(!m.hidden))
   })
   window.addEventListener('hashchange', route)   // 古い #/ のURLで来た人を実URLへ送るため
+  applySignedIn(signedIn())   // 開いた直後にナビを合わせる
   route()
 })()

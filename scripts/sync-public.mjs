@@ -65,13 +65,15 @@ function publicRace(j) {
   const { prediction, picks, tenkai, ...race } = j.race
   const free = picks?.free_win ? { lane: picks.free_win.lane, racer: picks.free_win.racer,
     probability: picks.free_win.probability, hit: picks.free_win.hit, payout: picks.free_win.payout } : null
-  // ★1着確率は会員限定（2026-09-23）。出走表からは外し、会員ぶんへ回す。
-  //   無料枠（単勝1点）の確率だけは、無料で見せる1本ぶんなので残す。
+  // ★予想は一切、誰でも見られる側に出さない（2026-09-26）。
+  //   ・1着確率と展開予想とAI予想 … 月300円の会員（合言葉で開く暗号文）
+  //   ・無料枠の単勝1点 … メール登録した人（member/ 置き場・Pages Functions が本人確認）
+  //   誰でも見られるのは、公式データ（出走表・結果・オッズ・直前情報）だけ。
   const entries = (race.entries ?? []).map(({ win_probability, top2_probability, ...e }) => e)
-  // 無料枠（単勝1点）のレースだけは、展開予想も入口として無料で見せる
   return { api_version: j.api_version, prediction_generated_at: j.prediction_generated_at,
-    race: { ...race, entries, free_pick: free, tenkai: free ? tenkai : null,
-      member_only: !free && !!tenkai, has_member_picks: !!(picks?.plan2 || picks?.haishin),
+    race: { ...race, entries, tenkai: null,
+      has_free_pick: !!free,                                   // 印だけ。中身は member/ 側
+      member_only: !!tenkai, has_member_picks: !!(picks?.plan2 || picks?.haishin),
       has_member_probs: (race.entries ?? []).some((e) => e.win_probability != null) } }
 }
 // 会員（月300円）に見せるぶん。これは必ず seal() で閉じてから送る。
@@ -91,13 +93,10 @@ function assertNoPaid(key, obj) {
   //   （実績の集計 results の plan2・b2 などは的中率の数字だけで買い目ではないので対象外。買い目は必ず配列で入る）
   for (const bad of ['"prediction":', '"picks":', '"trio":[', '"trifecta":[', '"exacta":['])
     if (s.includes(bad)) throw new Error(`${key} に有料の項目 ${bad} が入っている。送らずに止める`)
-  // 1着確率も会員限定（2026-09-23）。ただし例外が2つある：
-  //   ・無料枠（単勝1点）の free_pick.probability … 1日十数本だけ無料で見せているもの
-  //   ・無料枠のレースの展開予想（tenkai）の中の win_probability … 入口として無料で見せているもの
-  if (s.includes('"win_probability"') && !key.startsWith('tenkai/') && !key.startsWith('race/'))
-    throw new Error(`${key} に1着確率が入っている。送らずに止める`)
-  if (key.startsWith('race/') && obj?.race?.entries?.some((e) => e.win_probability != null))
-    throw new Error(`${key} の出走表に1着確率が残っている。送らずに止める`)
+  // 予想の数字は、誰でも見られる側には一切出さない（2026-09-26に例外を全部なくした）。
+  // 無料枠の単勝1点は member/（メール登録した人向け）へ、それ以外は paid/（月300円）へ回す。
+  for (const bad of ['"win_probability"', '"probability"', '"tenkai":{', '"honmei"'])
+    if (s.includes(bad)) throw new Error(`${key} に予想の数字 ${bad} が入っている。送らずに止める`)
 }
 
 // ---------- 送る（または書き出す） ----------
@@ -191,24 +190,41 @@ async function putPaid(docs, date) {
   await putRaw(out)
 }
 
+// ---------- メール登録した人ぶん（member/）----------
+// 月300円の会員ぶん（paid/）は暗号文だが、こちらは**暗号にしない**。
+// 代わりに Pages Functions が Supabase のログインを確かめてから返す（site/functions/data/[[path]].js）。
+// 置き場を直接叩かれても、鍵が無ければ Functions が拒否する。
+async function putMember(docs) {
+  for (const [key, body] of docs) {
+    if (!body) continue
+    if (!key.startsWith('member/')) throw new Error(`${key} は member/ で始めること`)
+    const s = JSON.stringify(body)
+    // ここに入れてよいのは無料枠（単勝1点）だけ。月300円の中身が紛れ込んだら止める。
+    for (const bad of ['"plan2"', '"haishin"', '"trio":[', '"trifecta":[', '"exacta":[', '"prediction":'])
+      if (s.includes(bad)) throw new Error(`${key} に月300円の中身 ${bad} が入っている。送らずに止める`)
+  }
+  await putRaw(docs)
+}
+
 async function removeOld(keepDates) {
   // 古い日のレースは消して、無料枠の500MBを守る（手元の本体には全部残っている）
   const keep = new Set(keepDates.map((d) => d.replace(/-/g, '')))
-  if (LOCAL) {
-    // 試し用も消す。残しておくと、決まりを変える前の古い書き出し（展開予想が全部公開だった頃のもの）が
-    // 残って点検が通らなくなる（2026-09-23にそうなった）
+  const old = (k) => {
+    const m = k.match(/^(?:paid\/|member\/)?race\/(\d{8})-/)
+      ?? k.match(/^(?:paid\/|member\/)?(?:races|tenkai|features|free)\/(\d{4}-\d{2}-\d{2})$/)
+    return m && !keep.has(m[1].replace(/-/g, ''))
+  }
+  // 手元の写しも掃除する。⚠ LOCAL のときだけでなく **--write-local のときも**。
+  // ここを分けていたために、古い日の写し（決まりを変える前のもの）が残り、
+  // 点検が165件の違反を出した（2026-09-26）。点検は手元の写しを見るので、掃除しないと嘘が出る。
+  if (WRITE_LOCAL) {
     for (const f of existsSync(OUT) ? readdirSync(OUT) : []) {
-      const k = f.replace(/\.json$/, '').replaceAll('__', '/')
-      const m = k.match(/^(?:paid\/)?race\/(\d{8})-/) ?? k.match(/^(?:paid\/)?(?:races|tenkai|features)\/(\d{4}-\d{2}-\d{2})$/)
-      if (m && !keep.has(m[1].replace(/-/g, ''))) rmSync(join(OUT, f))
+      if (old(f.replace(/\.json$/, '').replaceAll('__', '/'))) rmSync(join(OUT, f))
     }
-    return
+    if (LOCAL) return
   }
   for (const k of Object.keys(state)) {
-    const m = k.match(/^(?:paid\/)?race\/(\d{8})-/) ?? k.match(/^(?:paid\/)?(?:races|tenkai|features)\/(\d{4}-\d{2}-\d{2})$/)
-    if (!m) continue
-    const ymd = m[1].replace(/-/g, '')
-    if (keep.has(ymd)) continue
+    if (!old(k)) continue
     if (R2) { await deleteObject(R2, k + '.json'); delete state[k]; continue }
     const res = await fetch(`${CFG.url}/rest/v1/docs?key=eq.${encodeURIComponent(k)}`, { method: 'DELETE',
       headers: { apikey: CFG.service_key, Authorization: `Bearer ${CFG.service_key}` } })
@@ -221,23 +237,29 @@ async function removeOld(keepDates) {
 async function syncDay(date, withRacers) {
   const races = call(`/api/v1/races?date=${date}`)
   if (!races || races.status !== 'ok') return 0
-  const docs = [], paid = [], free = new Set()
+  const docs = [], paid = [], member = []
   for (const r of races.races) {
     const j = call(`/api/v1/race?id=${r.race_id}`)
     const d = publicRace(j)
-    r.free_pick = d?.race?.free_pick ?? null   // トップに「きょうの無料予想」を出すため（選手名・確率・的中まで）
-    if (r.free_pick) free.add(r.race_id)
-    r.member_only = !!d?.race?.member_only                            // 一覧に「会員」の印を出すため
-    delete r.favorite                                                 // 本命と1着確率は会員限定（2026-09-23）
+    r.free_pick = !!d?.race?.has_free_pick     // 印だけ。中身はメール登録した人向け（member/）
+    r.member_only = !!d?.race?.member_only     // 一覧に「会員」の印を出すため
+    delete r.favorite                          // 本命と1着確率は月300円の会員限定
     docs.push([`race/${r.race_id}`, d])
     const m = memberRace(j)
     if (m) paid.push([`paid/race/${r.race_id}`, m])
+    // 無料枠（単勝1点）は、メール登録した人にだけ中身を見せる
+    const f = j?.race?.picks?.free_win
+    if (f) member.push({ race_id: r.race_id, jcd: r.jcd, venue: r.venue, race_no: r.race_no,
+      deadline: r.deadline ?? null, closed: !!r.closed,
+      lane: f.lane, racer: f.racer, win_probability: f.probability,
+      hit: f.hit ?? null, payout: f.payout ?? null })
   }
-  // 展開予想の一覧。無料枠のレースだけ中身を出し、ほかは会員ぶん（合言葉で開く）へ回す
+  if (member.length) member.sort((a, b) => (a.deadline ?? '').localeCompare(b.deadline ?? ''))
+  // 展開予想は全レース会員ぶんへ。公開側は「どのレースにあるか」の印だけ
   const tk = call(`/api/v1/tenkai?date=${date}`)
   if (tk?.races?.length) {
     paid.push([`paid/tenkai/${date}`, { date, races: tk.races }])
-    tk.races = tk.races.map((r) => (free.has(r.race_id) ? r : { ...r, tenkai: null, member_only: !!r.tenkai }))
+    tk.races = tk.races.map((r) => ({ ...r, tenkai: null, member_only: !!r.tenkai }))
   }
   // 注目レース（ガチガチ・穴）は「AIの本命の1着確率」そのものなので会員限定にする。
   // アラート（まくり・前づけ・チルト・スタート）は展示タイムやチルトから作っていて
@@ -253,6 +275,7 @@ async function syncDay(date, withRacers) {
   docs.unshift([`races/${date}`, races], [`tenkai/${date}`, tk], [`features/${date}`, F])
   await put(docs)
   await putPaid(paid, date)
+  await putMember([[`member/free/${date}`, { date, count: member.length, picks: member }]])
   if (withRacers) {
     const ids = new Set()
     for (const [k, d] of docs) if (k.startsWith('race/')) for (const e of d?.race?.entries ?? []) if (e.racer_id) ids.add(e.racer_id)

@@ -10,8 +10,10 @@
 //   service_role の鍵は書き込みができる強い鍵なので、絶対にここへ入れない（data/supabase.json にだけ置く）。
 window.NAGI = {
   mode: 'r2',
-  supabaseUrl: '',      // 例 'https://xxxx.supabase.co'
-  supabaseAnonKey: '',  // Supabase → Project Settings → API → anon public
+  // ---- メール登録（無料）。Supabase の認証だけを使う ----
+  //   公開してよい鍵だけ。service_role / secret は絶対にここへ入れない。
+  supabaseUrl: 'https://fvhjuleiaycmavdorokp.supabase.co',
+  supabaseAnonKey: 'sb_publishable_tDZtdMhMYU4oDBEXSIPIAg_lYyRRFHL',
   noteUrl: '',          // 会員（月300円）を売る note のメンバーシップのURL（空なら案内ボタンを出さない）
 
   // ---- 検索とアクセス解析 ----

@@ -44,12 +44,28 @@ const paid = docs.filter(([k]) => k.startsWith('paid/'))
 let ng = 0
 const fail = (...a) => { ng++; if (ng <= 20) console.log('  ✗', ...a) }
 
-// ① 買い目が公開ぶんに無いこと（results の的中率の集計は買い目ではないので除く）
-for (const [k, b] of pub) {
+// ① 買い目が「誰でも見られる側」に無いこと
+//    ・results/ … 的中率の集計であって買い目ではないので対象外
+//    ・member/ … メール登録した人向け。無料枠の単勝1点が picks という名前で入っているので
+//                ここでは見ず、下の④で「月300円の中身が紛れていないか」を別に確かめる
+//                （2026-09-26：ここを分けずに誤検知していた）
+const openPub = pub.filter(([k]) => !k.startsWith('member/'))
+const memberDocs = pub.filter(([k]) => k.startsWith('member/'))
+for (const [k, b] of openPub) {
   if (k.startsWith('results/')) continue
   const s = JSON.stringify(b)
   for (const bad of ['"picks":', '"prediction":', '"trio":[', '"trifecta":[', '"exacta":['])
     if (s.includes(bad)) fail(k, 'に買い目', bad)
+  // 予想の数字も、誰でも見られる側には一切出さない（2026-09-26）
+  for (const bad of ['"win_probability"', '"tenkai":{', '"honmei"'])
+    if (s.includes(bad)) fail(k, 'に予想の数字', bad)
+}
+
+// ④ メール登録した人ぶんに、月300円の中身が紛れていないこと
+for (const [k, b] of memberDocs) {
+  const s = JSON.stringify(b)
+  for (const bad of ['"plan2"', '"haishin"', '"trio":[', '"trifecta":[', '"exacta":[', '"prediction":'])
+    if (s.includes(bad)) fail(k, 'に月300円の中身', bad)
 }
 
 // ② 展開予想は無料枠のレースだけ
