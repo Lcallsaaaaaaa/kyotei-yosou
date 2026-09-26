@@ -20,6 +20,29 @@
 .lock b { display: block; font-size: 15px; }
 .lock p { margin: 8px 0 0; font-size: 13.5px; color: var(--ink-2); }
 .cta.ghost { background: none; color: var(--accent); border: 1.5px solid var(--accent); }
+
+/* 会員で見られるもの（トップ）。数は app.js が当日のデータから入れる。
+   伏せ字（.mv-mask）は見本であって実データではない。薄く出す作りにしないこと。 */
+.member-value { margin: 20px 0; }
+.mv-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.mv-item { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.mv-item b { display: block; font-size: 13.5px; color: var(--ink-2); }
+.mv-n { display: block; margin: 4px 0 2px; font-size: 19px; font-weight: 700; color: var(--accent-strong);
+  font-variant-numeric: tabular-nums; }
+.mv-n.sub { font-size: 13px; font-weight: 400; color: var(--ink-2); }
+.mv-d { display: block; font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
+.mv-sample { position: relative; margin-top: 12px; padding: 14px; border-radius: 12px;
+  border: 1px dashed var(--line); background: var(--panel-2); }
+.mv-tag { position: absolute; top: -9px; left: 12px; padding: 1px 8px; border-radius: 999px;
+  font-size: 11px; background: var(--accent-soft); color: var(--accent-strong); border: 1px solid var(--line); }
+.mv-rows { display: grid; gap: 8px; }
+.mv-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13.5px; }
+.mv-mask { padding: 3px 10px; border-radius: 8px; background: var(--ground); color: transparent;
+  border: 1px solid var(--line); text-shadow: 0 0 9px var(--ink-2); user-select: none; }
+.mv-row .mv-sub { margin-left: auto; font-size: 12px; color: var(--ink-2); }
+.mv-note { margin: 10px 0 0; font-size: 12.5px; color: var(--ink-2); }
+.mv-rec { margin: 10px 0 0; font-size: 13px; color: var(--ink-2); line-height: 1.6; }
+.mv-go { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .mem-form { display: flex; gap: 8px; margin-top: 6px; }
 .mem-form input { flex: 1; min-width: 0; font: inherit; font-size: 17px; letter-spacing: .06em; text-transform: uppercase;
   padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink); }

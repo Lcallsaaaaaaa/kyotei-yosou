@@ -387,10 +387,45 @@
   const entryCards = () => `<h2>このサイトでできること</h2>
     <div class="entry-cards">${ENTRY.map(([href, t, d]) =>
       `<a href="${href}"><b>${t}</b><span>${d}</span></a>`).join('')}</div>`
-  const memberCta = () => `<div class="panel member-cta">
-    <b>全レースの展開予想とAI予想は会員の方に</b>
-    <p>月額300円。3連複2点プランと、全レースの展開予想、各レースの1着確率がご覧いただけます。</p>
-    <p><a class="cta" href="/member">会員について →</a></p></div>`
+  // ★会員（月300円）で何が見られるかを、トップでそのまま見せる（2026-09-27）。
+  //   前は「展開予想とAI予想がご覧いただけます」の一文だけで、
+  //   何本あるのか・どんな形で出るのかが分からなかった。
+  //   ⚠ 出せるのは「印」と「数」だけ。買い目・1着確率・展開予想の中身は
+  //     公開データに入っていない（sync-public が落としている）ので、ここでも出さない。
+  //   見本の数字は伏せ字。実データを薄く見せる作りにはしないこと。
+  const memberCta = (j = null, F = null, RS = null) => {
+    const rs = j?.races ?? []
+    const nTenkai = rs.filter((r) => r.member_only).length
+    const nAi = rs.filter((r) => r.has_paid_picks).length
+    const nAll = rs.length
+    const hasFeat = !!F?.member_only
+    const num = (n, unit) => n ? `<span class="mv-n">${n}${unit}</span>` : '<span class="mv-n sub">きょうのぶんは朝に入ります</span>'
+    const p2 = RS?.total?.plan2
+    const items = [
+      ['展開予想', num(nTenkai, 'レース'), '本線・対抗と、逃げ／差し／まくりの確率'],
+      ['AI予想（3連複2点）', num(nAi, 'レース'), '自信度がしきい値を超えたレースだけ'],
+      ['1着確率', num(nAll, 'レース'), '6艇ぶんの確率を出走表の中に'],
+      ['注目レース', hasFeat ? '<span class="mv-n">ガチガチ・穴</span>' : '<span class="mv-n sub">—</span>', '本命の1着確率で選んだ特集'],
+    ]
+    // ⚠ CSVの書き出しは「月300円で」と決めたが**まだ作っていない**。
+    //   出来ていないものをここに並べない（2026-09-27）。作ったら items に足す。
+    return `<section class="member-value" id="member-value">
+      <h2>会員（月額300円）で見られるもの <span class="sub">きょうのぶん</span></h2>
+      <div class="mv-grid">${items.map(([t, n, d]) =>
+        `<div class="mv-item"><b>${t}</b>${n}<span class="mv-d">${d}</span></div>`).join('')}</div>
+      <div class="mv-sample" aria-label="会員ページの見本。数字は伏せてあります">
+        <span class="mv-tag">見本</span>
+        <div class="mv-rows">
+          <div class="mv-row"><span>○○5R</span><span class="mv-mask">1=2=3</span><span class="mv-mask">1=2=4</span><span class="mv-sub">3連複2点</span></div>
+          <div class="mv-row"><span>○○5R</span><span class="mv-mask">本命 ●号艇 ●●.●%</span><span class="mv-mask">逃げ ●●%／差し ●●%</span><span class="mv-sub">展開予想</span></div>
+        </div>
+        <p class="mv-note">数字は会員ページで開きます。合言葉はこの端末の中だけに保存されます。</p>
+      </div>
+      ${p2 ? `<p class="mv-rec">直近30日の実測：3連複2点プラン ${p2.races}レース・的中${p2.hit_rate}%・<b>回収${p2.return_rate}%</b>。
+        回収率は100%未満です。外れた日も消さずに<a href="/results">実績</a>に残しています。</p>` : ''}
+      <p class="mv-go"><a class="cta" href="/member">会員について →</a>
+        <a class="cta ghost" href="/tenkai">展開予想の一覧を見る</a></p></section>`
+  }
   const emptyHero = () => `<section class="hero">
     <p class="hero-eyebrow">凪X演算分析×AI</p>
     <h1>${esc(SITE)}</h1>
@@ -526,19 +561,21 @@
         : signupPanel(`きょうの無料予想${free.length}本`)}`
 
     const entries = isToday ? entryCards() : ''
-    const memberBox = isToday ? memberCta() : ''
+    const memberBox = isToday ? memberCta(j, F, RS) : ''
 
     meta(isToday ? `${SITE}｜競艇の出走表・展開予想・データ` : `${md(date)}(${wd(date)})の出走表 全国${byV.size}場${j.races.length}レース`,
       isToday
         ? `全国24場の出走表・直前情報・オッズ・結果と、AIの1着確率。場ごとの攻略、選手データ、データ分析も公開。きょうは${byV.size}場${j.races.length}レース、無料予想${free.length}本。`
         : `${date.replaceAll('-', '/')}の全国${byV.size}場${j.races.length}レースの出走表。締切時刻・選手の成績・モーター・直前情報と、AIの1着確率をまとめています。`,
       { canonical: date === jstToday() ? '/' : `/d/${date}` })
-    // 並びは「顔 → 次の締切 → 無料予想 → レース一覧 → 特集 → 場状況 → ニュース → 入口」
-    view(`${hero}${nextBox}${tabs}${freeBox}
+    // 並びは「顔 → 次の締切 → 無料予想 → 会員で見られるもの → レース一覧 → 特集 → 場状況 → ニュース → 入口」
+    // ★会員のぶんは前に出す（2026-09-27）。以前はいちばん下にあり、
+    //   「会員ページで何が見られるのか、トップでは分からない」状態だった。
+    view(`${hero}${nextBox}${tabs}${freeBox}${memberBox}
       <h2>${isToday ? 'きょうのレース' : 'レース一覧'} <span class="sub">${md(date)}(${wd(date)})・${byV.size}場 ${j.races.length}レース</span></h2>
       <div class="grid">${venues}</div>
       <p class="note">「無料」は単勝1点を無料公開しているレース、「AI予想」は会員向けの買い目があるレースです。橙の枠は次に締め切るレースです。</p>
-      ${feat}${status}${newsBlock}${entries}${memberBox}`)
+      ${feat}${status}${newsBlock}${entries}`)
   }
 
   // ---------- レース詳細 ----------
