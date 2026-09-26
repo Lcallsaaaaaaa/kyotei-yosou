@@ -20,8 +20,11 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 function inline(s) {
   let t = esc(s)
   t = t.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
-  // リンクは http(s) と サイト内（#/…）だけ許す
-  t = t.replace(/\[([^\]]+)\]\(((?:https?:\/\/|#\/)[^)\s]+)\)/g, (m, a, u) =>
+  // リンクは http(s) と サイト内だけ許す。
+  // ★サイト内は「/about」の形。前は「#/」しか通しておらず（URLがハッシュだった頃の名残）、
+  //   /about などが変換されず [お問い合わせ](/about) と生のまま画面に出ていた（2026-09-26に発見）。
+  //   「//」で始まるものは外部サイトなので通さない。
+  t = t.replace(/\[([^\]]+)\]\(((?:https?:\/\/|#\/|\/(?!\/))[^)\s]+)\)/g, (m, a, u) =>
     `<a href="${u}"${u.startsWith('http') ? ' target="_blank" rel="noopener"' : ''}>${a}</a>`)
   return t
 }
