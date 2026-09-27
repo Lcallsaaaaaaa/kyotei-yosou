@@ -597,6 +597,15 @@ function asaData(date) {
   if (!existsSync(f)) return null
   return JSON.parse(readFileSync(f, "utf8"))
 }
+// ★日付つきURL（/haishin?date=2026-09-26 など）を開いたままにしていると、
+//   画面の中のリンクもその日付を持ち回るので、どこを押しても古い日から出られない。
+//   2026-09-27に「今日の分に更新されていない」として実際に踏まれた。
+//   今日でない日を見ているときは、その場でそう言って、戻り道を出す。
+const dayBanner = (date, path) => date === today() ? '' :
+  `<div class="note"><b>${esc(date)} を見ています（きょうは ${today()}）</b><br>` +
+  `URLに ?date=${esc(date)} が付いたままです。` +
+  `<a href="${esc(path)}">きょうの分を開く</a></div>`
+
 function asaPage(date, margin) {
   const d = asaData(date)
   const M = String(margin)
@@ -637,7 +646,7 @@ border-radius:8px;padding:11px 13px;font-size:13px;margin-bottom:12px}
   //   戻すときは git 履歴から b2html のブロックを拾う。
   const b2html = ""
 
-  if (!d) return head + `<h1>朝の見張り表</h1><div class="sub">${date}</div>` +
+  if (!d) return head + dayBanner(date, '/asa') + `<h1>朝の見張り表</h1><div class="sub">${date}</div>` +
     b2html + `<div class="note2">${date} の見張り表（オッズ条件）はありません。<br>買うのはB2判定だけなので、無くても支障はありません。</div>`
   const tabs = d.margins.map((m) => `<a href="/asa?date=${date}&m=${m}"${String(m) === M ? " class=\"on\"" : ""}>余裕 ${m.toFixed(1)}</a>`).join("")
 
@@ -653,7 +662,7 @@ border-radius:8px;padding:11px 13px;font-size:13px;margin-bottom:12px}
     return `<div class="r"><div class="rh"><b>${esc(r.venue)} ${r.race_no}R</b>` +
       `<span>締切 ${esc(r.deadline || "-")}</span></div>${rows}</div>`
   }).join("")
-  return head + `<h1>朝の見張り表</h1><div class="sub">${date}　${d.races.length}レース　見張る艇 ${n}本</div>` +
+  return head + dayBanner(date, '/asa') + `<h1>朝の見張り表</h1><div class="sub">${date}　${d.races.length}レース　見張る艇 ${n}本</div>` +
     `<div class="tabs">${tabs}<a href="/">当日の判定へ</a><a href="/haishin">配信用</a></div>` + b2html +
     `<div class="note"><b>⚠ 2026-08-31：この判定は実測で成立していません</b><br>
 単勝は総取り式で、<b>払戻は締切後に決まります</b>。締切前の表示は目安でしかありません。<br>
@@ -765,7 +774,7 @@ border-radius:8px;padding:11px 13px;font-size:12.5px;color:var(--sub);margin-bot
   const tabs = `<div class="tabs">` +
     (TRIO ? `<a href="/haishin?date=${date}">4点＋3連単</a>` : `<a href="/plan2?date=${date}">3連複2点プラン</a>`) +
     `<a href="/tansho?date=${date}">無料予想（単勝1点）</a><a href="/seiseki">これまでの実績</a><a href="/spot?date=${date}">企画枠</a><a href="/">当日の判定</a><a href="/asa?date=${date}">朝の見張り表</a></div>`
-  if (!rows.length) return head + `<h1>${title}</h1><div class="sub">${date}</div>` + tabs +
+  if (!rows.length) return head + dayBanner(date, TRIO ? '/plan2' : '/haishin') + `<h1>${title}</h1><div class="sub">${date}</div>` + tabs +
     `<div class="note">${date} の配信用がありません。<br><br>作るには:<br><code>node scripts/haishin.mjs --date ${date}</code></div>`
   const R = new Map()
   for (const r of rows) {
@@ -833,7 +842,7 @@ ${sum}</div>`
 ただし<b>回収率はマイナス</b>（3連複80.3%・3連単85.0%）。買い続けると減ります。<br>
 買うのは <a href="/asa?date=${date}">朝の見張り表</a> の単勝だけにしてください。
 </div>`
-  return head + `<h1>${title}</h1><div class="sub">${date}　${R.size}レース</div>` + tabs + score + intro + body +
+  return head + dayBanner(date, TRIO ? '/plan2' : '/haishin') + `<h1>${title}</h1><div class="sub">${date}　${R.size}レース</div>` + tabs + score + intro + body +
     `<div class="note2">絞りは<b>自信度</b>（3連複の上位4点の確率の合計）が0.76以上＝本番モデルの上位10%のレース。
 朝の予想だけで決まるので、オッズは使っていません。<br>
 1日15本前後。自信のあるレースが少ない日は本数が減ります。<br>
@@ -1041,7 +1050,7 @@ border-bottom:1px solid var(--line);background:rgba(0,0,0,.02)}
 border-radius:8px;padding:11px 13px;font-size:12.5px;color:var(--sub);margin-bottom:12px}
 </style>`
   const tabs = `<div class="tabs"><a href="/haishin">きょうの配信</a><a href="/seiseki">配信の実績</a><a href="/">当日の判定</a></div>`
-  if (!rows.length) return head + `<h1>企画枠</h1><div class="sub">${date}</div>` + tabs +
+  if (!rows.length) return head + dayBanner(date, '/spot') + `<h1>企画枠</h1><div class="sub">${date}</div>` + tabs +
     `<div class="note">${date} の企画枠がありません。<br><br>作るには:<br><code>node scripts/spot.mjs --date ${date} --jcd 9</code></div>`
   const R = new Map()
   for (const r of rows) {
@@ -1084,7 +1093,7 @@ ${(done.length * 800).toLocaleString()}円ぶん買っていたら <b class="${g
 <div class="k"><div class="kl">3連単</div><div class="kv">${a.t.map((x) => cell(x, '-')).join('')}</div></div>
 ${sum}</div>`
   }).join('')
-  return head + `<h1>${esc(first.v)}　${esc(first.se || '')}</h1>` +
+  return head + dayBanner(date, '/spot') + `<h1>${esc(first.v)}　${esc(first.se || '')}</h1>` +
     `<div class="sub">${date}　${first.dn ? first.dn + '日目　' : ''}全${R.size}レース</div>` + tabs + score +
     `<div class="note"><b>これは企画枠です</b><br>
 場を指定した<b>全レース</b>の予想で、当たりにくいレースも入っています。<br>
@@ -1184,7 +1193,7 @@ border-radius:8px;padding:11px 13px;font-size:12.5px;color:var(--sub);margin-bot
 <div><b>${(tot.ret - tot.done * 100).toLocaleString()}円</b><span>1点100円で買った場合<br>の合計収支</span></div>
 </div></div>` : ''
   if (!rows.length)
-    return head2 + sum + warn + `<div class="note2">${date} の予想はまだありません。<br>
+    return head2 + dayBanner(date, '/tansho') + sum + warn + `<div class="note2">${date} の予想はまだありません。<br>
 作るには <code>node scripts/tansho.mjs --date ${date}</code></div>`
   const list = rows.map((r) => {
     const isOff = off.has(r.race_id)
@@ -1203,7 +1212,7 @@ border-radius:8px;padding:11px 13px;font-size:12.5px;color:var(--sub);margin-bot
     ? `<div class="note2">きょうの結果：${done.length}本中 ${dh.length}本的中（${pct(dh.length, done.length)}%）。
 1点100円なら 投資 ${(done.length * 100).toLocaleString()}円 → 払戻 ${dret.toLocaleString()}円
 （${dret - done.length * 100 >= 0 ? '+' : ''}${(dret - done.length * 100).toLocaleString()}円）</div>` : ''
-  return head2 + sum + warn + todaySum + list +
+  return head2 + dayBanner(date, '/tansho') + sum + warn + todaySum + list +
 `<div class="wrap"><h2>日ごと（外した日も消していません）</h2><table>
 <tr><th>日付</th><th>本数</th><th>的中</th><th>回収率</th><th>収支</th></tr>
 ${days.filter((d) => d.done).map((d) => `<tr><td>${d.date.slice(5)}</td>
