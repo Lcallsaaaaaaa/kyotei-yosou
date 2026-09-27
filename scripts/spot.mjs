@@ -128,6 +128,15 @@ function gradeOf(series) {
   if (/モーターボート大賞|G2|ＧⅡ/.test(s)) return 'G2'
   return null
 }
+/** 公式の開催予定（schedule）に載っているグレード。無ければ null */
+function schedGrade(jcd) {
+  try {
+    const r = db.prepare(`SELECT grade FROM schedule
+      WHERE jcd=? AND start_date<=? AND end_date>=? LIMIT 1`).get(jcd, DATE, DATE)
+    return GRADES.includes(r?.grade) ? r.grade : null
+  } catch { return null }   // schedule がまだ無い環境
+}
+
 if (argv.includes('--auto')) {
   // まず番組表から当日の開催と開催名を拾う（当日でも引ける）
   // ⚠ programs に jcd 列は無い。race_id が「YYYYMMDD-JJ-RR」なので切り出す。
@@ -143,8 +152,6 @@ if (argv.includes('--auto')) {
       series = (jj.races ?? []).find((r) => r.jcd === jcd)?.series ?? null
     }
     if (!series) series = db.prepare(`SELECT series FROM races WHERE date=? AND jcd=? LIMIT 1`).get(DATE, jcd)?.series ?? null
-    const g = gradeOf(series)
-    if (!g || !GRADES.includes(g)) continue
     // ★開催名だけでは誤判定する。「あきんど倶楽部30周年記念杯」は団体の周年で一般戦だった
     //   （2026-09-05に実際に拾ってしまった）。grade.mjs と同じく**1号艇のA1率**で検算する。
     //   実測ではSG/G1が98.5%、G3以下と一般は13〜21%と綺麗に分かれる。
@@ -153,6 +160,23 @@ if (argv.includes('--auto')) {
       FROM programs WHERE substr(race_id,1,8)=? AND substr(race_id,10,2)=? AND lane=1`)
       .get(DATE.replace(/-/g, ''), String(jcd).padStart(2, '0'))
     const rate = a1 && a1.n ? a1.a1 / a1.n : 0
+    // ★グレードの見方を3段にした（2026-09-27）。
+    //   それまでは開催名の regex だけで見ており、**固有名のG1を丸ごと取り逃していた**。
+    //   徳山「ダイヤモンドカップ」（G1）が 9/13〜9/16 の4日間ぶん欠品していた。
+    //   誰も気づかないまま、月300円の中身が4日間なかった。
+    //     ① 公式の開催予定（schedule）にグレードが載っていればそれが正
+    //        ただし schedule は「これから始まる開催」しか持たないことがあり、
+    //        すでに始まっている開催（今日の若松SGなど）は載っていない
+    //     ② 載っていなければ開催名から見る（従来どおり）
+    //     ③ どちらでも分からなくても、1号艇のA1率が飛び抜けて高ければ格上とみなす
+    //        実測：9/14は 100% の次が 42%、9/27は 83% の次が 50%。70%で切れば
+    //        一般戦を巻き込まずに、名前の分からない格上だけを拾える。
+    let g = schedGrade(jcd) ?? gradeOf(series)
+    if (!g && rate >= 0.7) {
+      g = 'G1'   // どのグレードかは分からないので G1 として扱う
+      console.log(`  （救済）${series} … 名前では分からないが1号艇のA1率 ${(rate * 100).toFixed(0)}% なので格上として扱う`)
+    }
+    if (!g || !GRADES.includes(g)) continue
     if (rate < 0.6) {
       console.log(`  （除外）${series} … 1号艇のA1率 ${(rate * 100).toFixed(0)}% で格上ではない`)
       continue
@@ -217,6 +241,17 @@ picks.sort((a, b) => a.r.race_no - b.r.race_no)
     for (const x of late) picks.splice(picks.indexOf(x), 1)
     if (late.length) console.log(`締切を過ぎた ${late.length}レースは記録しない: ` +
       late.map((x) => `${x.r.venue}${x.r.race_no}R(${DL.get(x.r.race_id)})`).join(' '))
+  }
+  // ★過ぎた日には**一切書かない**（2026-09-27に入れた）。
+  //   この止め金が無く、判定を直したか確かめるつもりで
+  //   `--auto --date 2026-09-14` を流したら、**すでに走り終えた12レースぶんの
+  //   買い目96件が記録された**。当日に出していない予想が実績に混ざる＝後出し。
+  //   上の late ガードは「今日」にしか効かないので、ここで別に止める。
+  //   どうしても入れ直すときだけ --force（結果の照合前であることを自分で確かめること）。
+  if (DATE < _today && !argv.includes('--force')) {
+    console.log(`${DATE} は過ぎた日なので記録しません（判定だけ表示しました）。`)
+    console.log('  入れ直す必要があるときだけ --force を付けてください。')
+    db.close(); process.exit(0)
   }
 }
 
