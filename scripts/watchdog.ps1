@@ -44,6 +44,11 @@ $workers = @(
   # 2026-09-22: collects pre-race info (exhibition, tilt, parts, weather) before each deadline for the data site
   @{ name = 'before-live'; match = 'before\.mjs.*--live'; log = "before-live-$today.log"
      args = @('scripts\before.mjs', '--live') }
+  # 2026-09-27: pushes today's data to R2 every 3 min. Without it the public site
+  # is frozen at the 6am batch all day: no pre-race info, no odds, no results.
+  # It was written long ago but never started and never watched.
+  @{ name = 'sync-live'; match = 'sync-public\.mjs.*--live'; log = "sync-live-$today.log"
+     args = @('scripts\sync-public.mjs', '--live') }
 )
 
 # ★-RedirectStandardOutput は追記ではなく「上書き」する。
