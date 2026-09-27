@@ -447,6 +447,12 @@ for (;;) {
       const n = writeSeoFiles()
       if (n) log(`sitemap.xml に ${n} ページ（site/ を置き直すと反映されます）`)
     }
+    // ★meta は毎周送る（2026-09-27）。以前は full のときだけだったので、
+    //   3分おきに当日ぶんを送っていても **meta.updated_at は朝のまま**だった。
+    //   画面上部の「データの更新が◯分止まっています」は meta を見ているので、
+    //   正常に動いている日でも夕方には「6時間止まっています」と出ていた。
+    //   欠品の見張り（kesson.mjs）も meta を見るので、ここが古いと嘘の警報になる。
+    else await syncMeta([addDays(d0, -1), d0, addDays(d0, 1)])
     if (sent > before) log(`送信 ${sent - before}件`)
   } catch (e) { log('失敗:', e.message) }
   await sleep(3 * 60_000)

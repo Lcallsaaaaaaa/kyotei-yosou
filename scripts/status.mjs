@@ -505,6 +505,7 @@ h3{font-size:.78rem;color:var(--mut);margin:16px 0 6px;font-weight:600;letter-sp
 .note{color:var(--mut);font-size:11.5px;line-height:1.85;margin-top:20px;border-top:1px solid var(--line);padding-top:12px}
 .note b{color:var(--ink)}
 </style></head><body>
+${kessonBar()}${dayBanner(date, '/')}
 <h1>競艇 買い目　${date}</h1>${`<div style="margin:6px 0 10px;display:flex;gap:14px"><a href="/asa" style="font-size:13px;color:inherit">朝の見張り表 →</a><a href="/haishin" style="font-size:13px;color:inherit">配信用 →</a></div>`}
 <p class="meta">${now.toTimeString().slice(0, 5)} 時点／${job.running ? 15 : live.length ? 5 : 20}秒ごとに自動更新</p>
 <div class="bar">
@@ -597,6 +598,20 @@ function asaData(date) {
   if (!existsSync(f)) return null
   return JSON.parse(readFileSync(f, "utf8"))
 }
+// ★欠品の赤帯（2026-09-27）。kesson.mjs が data/kesson.json に書いたものを出す。
+//   通知は慣れると見なくなるので、**毎朝必ず開く画面**に出すほうが効く。
+//   きょうのぶんでなければ出さない（古い警告が残り続けるほうが害になる）。
+function kessonBar() {
+  try {
+    const j = JSON.parse(readFileSync(join(ROOT, 'data', 'kesson.json'), 'utf8'))
+    if (j.date !== today() || !j.bad?.length) return ''
+    return `<div style="background:#b01026;color:#fff;padding:10px 13px;border-radius:8px;
+margin:0 12px 12px;font-size:13.5px;line-height:1.6">
+<b>出ていないものが ${j.bad.length}件あります</b>（${esc(j.at)}時点）<br>` +
+      j.bad.map((b) => `・${esc(b.name)}：${esc(b.detail)}`).join('<br>') + `</div>`
+  } catch { return '' }   // まだ一度も走っていない
+}
+
 // ★日付つきURL（/haishin?date=2026-09-26 など）を開いたままにしていると、
 //   画面の中のリンクもその日付を持ち回るので、どこを押しても古い日から出られない。
 //   2026-09-27に「今日の分に更新されていない」として実際に踏まれた。
@@ -646,7 +661,7 @@ border-radius:8px;padding:11px 13px;font-size:13px;margin-bottom:12px}
   //   戻すときは git 履歴から b2html のブロックを拾う。
   const b2html = ""
 
-  if (!d) return head + dayBanner(date, '/asa') + `<h1>朝の見張り表</h1><div class="sub">${date}</div>` +
+  if (!d) return head + kessonBar() + dayBanner(date, '/asa') + `<h1>朝の見張り表</h1><div class="sub">${date}</div>` +
     b2html + `<div class="note2">${date} の見張り表（オッズ条件）はありません。<br>買うのはB2判定だけなので、無くても支障はありません。</div>`
   const tabs = d.margins.map((m) => `<a href="/asa?date=${date}&m=${m}"${String(m) === M ? " class=\"on\"" : ""}>余裕 ${m.toFixed(1)}</a>`).join("")
 
@@ -662,7 +677,7 @@ border-radius:8px;padding:11px 13px;font-size:13px;margin-bottom:12px}
     return `<div class="r"><div class="rh"><b>${esc(r.venue)} ${r.race_no}R</b>` +
       `<span>締切 ${esc(r.deadline || "-")}</span></div>${rows}</div>`
   }).join("")
-  return head + dayBanner(date, '/asa') + `<h1>朝の見張り表</h1><div class="sub">${date}　${d.races.length}レース　見張る艇 ${n}本</div>` +
+  return head + kessonBar() + dayBanner(date, '/asa') + `<h1>朝の見張り表</h1><div class="sub">${date}　${d.races.length}レース　見張る艇 ${n}本</div>` +
     `<div class="tabs">${tabs}<a href="/">当日の判定へ</a><a href="/haishin">配信用</a></div>` + b2html +
     `<div class="note"><b>⚠ 2026-08-31：この判定は実測で成立していません</b><br>
 単勝は総取り式で、<b>払戻は締切後に決まります</b>。締切前の表示は目安でしかありません。<br>

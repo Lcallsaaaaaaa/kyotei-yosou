@@ -51,6 +51,34 @@ $workers = @(
      args = @('scripts\sync-public.mjs', '--live') }
 )
 
+# ★生きていても何もしていない常駐を立て直す（2026-09-27）。
+#   プロセスの有無だけでは「固まったまま生きている」を拾えない。
+#   sync-live は1周ごとに data/sync-public-state.json を書くので、
+#   その更新時刻を鼓動として見る。レースのある時間帯に20分以上止まっていたら殺す。
+#   （下の foreach が、プロセスが居なくなったのを見て立て直す）
+$hm = Get-Date -Format 'HH:mm'
+if ($hm -ge '08:30' -and $hm -le '21:30') {
+  $beat = Join-Path $root 'data\sync-public-state.json'
+  if (Test-Path $beat) {
+    $age = ((Get-Date) - (Get-Item $beat).LastWriteTime).TotalMinutes
+    if ($age -gt 20) {
+      $stuck = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
+        Where-Object { $_.CommandLine -match 'sync-public\.mjs.*--live' })
+      foreach ($p in $stuck) {
+        try {
+          Stop-Process -Id $p.ProcessId -Force
+          "$(Get-Date -Format 'HH:mm:ss') killed stuck sync-live (PID $($p.ProcessId), no beat for $([int]$age) min)" |
+            Add-Content $wlog -Encoding utf8
+        } catch {
+          "$(Get-Date -Format 'HH:mm:ss') FAILED to kill sync-live: $_" | Add-Content $wlog -Encoding utf8
+        }
+      }
+      # 殺した直後の一覧は古いので取り直す
+      $cmdlines = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" | ForEach-Object { $_.CommandLine })
+    }
+  }
+}
+
 # ★-RedirectStandardOutput は追記ではなく「上書き」する。
 #   2026-08-23 に auto-bet が死んで再起動した際、朝からの記録が全部消えて
 #   死んだ原因を追えなくなった。再起動ごとに別ファイルへ書き、後で結合する。

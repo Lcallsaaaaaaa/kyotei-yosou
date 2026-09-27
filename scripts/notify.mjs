@@ -65,10 +65,24 @@ function toast(title, text) {
     + '$n.Icon=[System.Drawing.SystemIcons]::Information;$n.Visible=$true;'
     + `$n.ShowBalloonTip(20000,'${esc(title)}','${esc(text)}',[System.Windows.Forms.ToolTipIcon]::Info);`
     + 'Start-Sleep -Seconds 12;$n.Dispose()'
-  try {
-    spawn('powershell', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', ps],
-      { detached: true, stdio: 'ignore' }).unref()
-  } catch {}
+  // ★spawn の失敗は try/catch では捕まらない（'error' イベントで後から飛んでくる）。
+  //   受け手が無いと Node が落ちる。2026-09-27、タスクスケジューラから走らせた
+  //   欠品の見張りが powershell を PATH に見つけられず、通知どころか
+  //   **見張りそのものが落ちた**。知らせられないことより、落ちるほうが害が大きい。
+  //   PATH に無いことがあるので、Windows の絶対パスも順に試す。
+  const cands = [process.env.SystemRoot
+    ? join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe') : null,
+  'powershell.exe', 'powershell'].filter(Boolean)
+  const run = (i) => {
+    if (i >= cands.length) return
+    try {
+      const p = spawn(cands[i], ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', ps],
+        { detached: true, stdio: 'ignore' })
+      p.on('error', () => run(i + 1))   // これが無いと落ちる
+      p.unref()
+    } catch { run(i + 1) }
+  }
+  run(0)
 }
 
 /** 買い目を知らせる。届いた経路を配列で返す */
