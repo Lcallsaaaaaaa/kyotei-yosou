@@ -101,7 +101,18 @@ function assertNoPaid(key, obj) {
 
 // ---------- 送る（または書き出す） ----------
 const state = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8')) : {}
-const hash = (o) => createHash('sha1').update(JSON.stringify(o)).digest('hex')
+// ★指紋から now（書類を作った時刻）を外す（2026-09-27）。
+//   api.mjs はどの書類にも now を入れる。中身が1文字も変わっていなくても
+//   毎回ちがう値になるので、**「変化なしなら送らない」が一度も効いていなかった**。
+//   2,991件のうち送信2,348件・省略643件、14分。おかげでサイトの公開は
+//   1日1回しか回せず、日中は直前情報もオッズも結果も届かない状態だった。
+//   now は画面のどこからも読んでいない（app.js は Date.now() だけ）。
+//   送らなかった書類の now が古いままなのは、中身が変わっていない以上むしろ正しい。
+const hash = (o) => {
+  const x = o && typeof o === 'object' && !Array.isArray(o) && 'now' in o
+    ? (({ now, ...rest }) => rest)(o) : o
+  return createHash('sha1').update(JSON.stringify(x)).digest('hex')
+}
 let sent = 0, skipped = 0
 async function put(docs) {
   for (const [key, body] of docs) {
