@@ -71,7 +71,19 @@ if (!LIVE && (!from || !to)) { console.error('--from --to が必要（当日の�
 const REFETCH = argv.includes('--refetch')
 //   --need … 展示の進入か調整重量のどちらかが欠けているレースを取り直す（両方を一度に埋める）
 const NEED = argv.includes('--need')
-const targets = LIVE ? [] : all(NEED ? `
+//   --need-dir … 風向きが入っていないレースだけ取り直す（2026-10-02）
+//     風向きは wind_dir 列を足したあとに取り始めたので、それ以前は空のまま。
+//     races.wind_dir（Kファイル）は全履歴あるが、**レース後に測った値**なので
+//     予想には使えない。しかも直前の値とは風速で51.4%・向きで6割しか一致しない
+//     （展示の時点とレース中で風が変わる）。学習にも予想にも同じ出どころを使う
+//     必要があるので、直前ページの値を過去にさかのぼって埋める。
+const NEED_DIR = argv.includes('--need-dir')
+const targets = LIVE ? [] : all(NEED_DIR ? `
+  SELECT r.race_id, r.jcd, r.race_no, r.date FROM races r
+  WHERE r.date BETWEEN ? AND ?
+    AND NOT EXISTS (SELECT 1 FROM before_race f WHERE f.race_id=r.race_id AND f.status='empty')
+    AND NOT EXISTS (SELECT 1 FROM before_race f WHERE f.race_id=r.race_id AND f.wind_dir IS NOT NULL)
+  ORDER BY r.date DESC, r.jcd, r.race_no` : NEED ? `
   SELECT r.race_id, r.jcd, r.race_no, r.date FROM races r
   WHERE r.date BETWEEN ? AND ?
     AND NOT EXISTS (SELECT 1 FROM before_race f WHERE f.race_id=r.race_id AND f.status='empty')
