@@ -230,9 +230,16 @@ if (LIVE) {
   //   3連単(120)・3連複(20)・2連単(30)・2連複(15) を取る。単勝・複勝は odds-live.mjs が取っている。
   //   並びは払戻との突き合わせで確定済み：3連単=列が1着・行が2着×3着（行ごと）／3連複=行が2つ目と3つ目・列が1つ目（行ごと）
   //   ／2連単=列が1着・行が2着（行ごと）／2連複=行が2つ目・列が1つ目（行ごと）。2026-09-22に12レースで2連単・2連複とも一致
-  db.exec(`CREATE TABLE IF NOT EXISTS odds_snap (race_id TEXT NOT NULL, kind TEXT NOT NULL, combo TEXT NOT NULL, odds REAL,
-      PRIMARY KEY (race_id, kind, combo));
-    CREATE TABLE IF NOT EXISTS odds_snap_meta (race_id TEXT PRIMARY KEY, taken TEXT, mins_before INTEGER)`)
+  // ★phase を主キーに入れる（2026-10-02）。
+  //   20分前と5分前の2回取っているのに、主キーが (race_id,kind,combo) だったので
+  //   **2回目が1回目を上書き**していた。1,413レース分あっても全部「最後の1回」で、
+  //   オッズがどう動いたかは一度も残っていなかった。
+  //   phase 1=締切20分前ごろ ／ 2=締切5分前ごろ。
+  db.exec(`CREATE TABLE IF NOT EXISTS odds_snap (race_id TEXT NOT NULL, phase INTEGER NOT NULL,
+      kind TEXT NOT NULL, combo TEXT NOT NULL, odds REAL, mins_before INTEGER,
+      PRIMARY KEY (race_id, phase, kind, combo));
+    CREATE TABLE IF NOT EXISTS odds_snap_meta (race_id TEXT NOT NULL, phase INTEGER NOT NULL,
+      taken TEXT, mins_before INTEGER, PRIMARY KEY (race_id, phase))`)
   const O3T = (() => { const cols = []; for (let a = 1; a <= 6; a++) { const rest = [1, 2, 3, 4, 5, 6].filter((x) => x !== a), col = []
     for (const b of rest) for (const c of rest) if (c !== b) col.push(`${a}-${b}-${c}`); cols.push(col) }
     const o = []; for (let r = 0; r < 20; r++) for (let c = 0; c < 6; c++) o.push(cols[c][r]); return o })()
@@ -241,10 +248,10 @@ if (LIVE) {
     const o = []; for (let r = 0; r < 5; r++) for (let c = 0; c < 6; c++) o.push(cols[c][r]); return o })()
   const O2F = (() => { const o = []; for (let b = 2; b <= 6; b++) for (let a = 1; a < b; a++) o.push(`${a}-${b}`); return o })()
   const pts = (h) => [...h.matchAll(/<td class="oddsPoint[^"]*">([^<]*)<\/td>/g)].map((m) => { const v = Number(m[1].trim()); return Number.isFinite(v) && v > 0 ? v : null })
-  const insO = db.prepare(`INSERT OR REPLACE INTO odds_snap (race_id,kind,combo,odds) VALUES (?,?,?,?)`)
-  const insOM = db.prepare(`INSERT OR REPLACE INTO odds_snap_meta (race_id,taken,mins_before) VALUES (?,?,?)`)
+  const insO = db.prepare(`INSERT OR REPLACE INTO odds_snap (race_id,phase,kind,combo,odds,mins_before) VALUES (?,?,?,?,?,?)`)
+  const insOM = db.prepare(`INSERT OR REPLACE INTO odds_snap_meta (race_id,phase,taken,mins_before) VALUES (?,?,?,?)`)
   const snaps = new Map()
-  async function snapOdds(r, left) {
+  async function snapOdds(r, left, phase) {
     const q = `rno=${r.race_no}&jcd=${String(r.jcd).padStart(2, '0')}&hd=${DAY.replace(/-/g, '')}`
     const got3t = pts(await (await fetch(`https://www.boatrace.jp/owpc/pc/race/odds3t?${q}`, { signal: AbortSignal.timeout(25_000) })).text())
     await sleep(1000)
@@ -257,8 +264,8 @@ if (LIVE) {
     for (let a = 1; ; a++) {
       try {
         db.exec('BEGIN IMMEDIATE')
-        for (const [kind, order, v] of sets) if (v) { order.forEach((c, i) => insO.run(r.race_id, kind, c, v[i])); n += v.length }
-        if (n) insOM.run(r.race_id, new Date().toISOString(), left)
+        for (const [kind, order, v] of sets) if (v) { order.forEach((c, i) => insO.run(r.race_id, phase, kind, c, v[i], left)); n += v.length }
+        if (n) insOM.run(r.race_id, phase, new Date().toISOString(), left)
         db.exec('COMMIT'); break
       } catch (e) { try { db.exec('ROLLBACK') } catch {} ; await sleep(Math.min(20_000, 1_000 * a)) }
     }
@@ -316,7 +323,7 @@ if (LIVE) {
       const want = left <= 5 ? 2 : left <= 20 ? 1 : 0
       if (want > (snaps.get(r.race_id) ?? 0) && left >= 0) {
         snaps.set(r.race_id, want)
-        try { const n = await snapOdds(r, left); if (n) console.log(`${hm()} ${r.race_id} オッズ ${n}通り（締切${left}分前）`) }
+        try { const n = await snapOdds(r, left, want); if (n) console.log(`${hm()} ${r.race_id} オッズ ${n}通り（締切${left}分前）`) }
         catch (e) { console.log(`${hm()} ${r.race_id} オッズ取得失敗 ${e.message}`) }
         await sleep(1000)
       }

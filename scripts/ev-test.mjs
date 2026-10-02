@@ -72,10 +72,12 @@ function report(title, acc, note) {
 // ---------- ② 実行できる側：締切前オッズで並べ替え・pred3の確率 ----------
 {
   const acc = mk()
-  const snapRaces = db.prepare(`SELECT DISTINCT race_id FROM odds_snap WHERE kind='sanrentan'`).all().map((r) => r.race_id)
+  // ★phase 2＝締切5分前ごろ（実際に買える最後の時点）。2026-10-02に phase を足すまでは
+  //   20分前のぶんが5分前に上書きされていたので、全部が「最後の1回」だった。
+  const snapRaces = db.prepare(`SELECT DISTINCT race_id FROM odds_snap WHERE kind='sanrentan' AND phase=2`).all().map((r) => r.race_id)
   const probs = db.prepare(`SELECT combo, p FROM pred3 WHERE race_id=?`)
-  const snap = db.prepare(`SELECT combo, odds FROM odds_snap WHERE race_id=? AND kind='sanrentan'`)
-  const mins = new Map(db.prepare(`SELECT race_id, mins_before FROM odds_snap_meta`).all().map((r) => [r.race_id, r.mins_before]))
+  const snap = db.prepare(`SELECT combo, odds FROM odds_snap WHERE race_id=? AND kind='sanrentan' AND phase=2`)
+  const mins = new Map(db.prepare(`SELECT race_id, mins_before FROM odds_snap_meta WHERE phase=2`).all().map((r) => [r.race_id, r.mins_before]))
   let used = []
   for (const rid of snapRaces) {
     const P = probs.all(rid); if (P.length < 100) continue
