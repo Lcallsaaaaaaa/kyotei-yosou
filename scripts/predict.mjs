@@ -324,10 +324,37 @@ if (!argv.includes('--nobefore')) {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
   const strip = (h) => h.replace(/<[^>]*>/g, '\t').replace(/&nbsp;/g, ' ').replace(/\t+/g, '\t')
   const ids = [...new Set(feats.map((o) => o.race_id))]
-  console.log(`直前情報を取得中（${ids.length}レース）...`)
   const got = new Map()
+  // ★--before-db … 公式へ取りに行かず、before_info / before_race から読む（2026-10-02）
+  //   ここは当日の**全レース**を同時6本で取りに行く。朝に1〜2回なら問題ないが、
+  //   数分おきに回すと1時間で2,000ページを超え、確実に遮断される
+  //   （日和では実際に遮断された）。
+  //   直前情報は before.mjs --live が常駐で集めて before_info に入れているので、
+  //   予想を作り直すだけならDBから読めばよく、公式への取得はゼロで済む。
+  const FROM_DB = argv.includes('--before-db')
+  if (FROM_DB) {
+    const bi = db.prepare(`SELECT race_id, lane, tilt, parts, weight, ex_time
+      FROM before_info WHERE substr(race_id,1,8)=?`).all(ymd)
+    const br = new Map(db.prepare(`SELECT race_id, air_temp, water_temp, wind_speed, wave
+      FROM before_race WHERE substr(race_id,1,8)=?`).all(ymd).map((r) => [r.race_id, r]))
+    for (const r of bi) {
+      let g = got.get(r.race_id)
+      if (!g) {
+        const w = br.get(r.race_id)
+        g = { boats: [], air: w?.air_temp ?? null, water: w?.water_temp ?? null,
+          wind: w?.wind_speed ?? null, wave: w?.wave ?? null }
+        got.set(r.race_id, g)
+      }
+      // 取得側は parts を 1/0 で持つ（中身の文字列ではなく「交換したか」だけ使う）
+      g.boats.push({ lane: r.lane, weight: r.weight, ex: r.ex_time, tilt: r.tilt, parts: r.parts ? 1 : 0 })
+    }
+    // 6艇そろっていないレースは、取得側と同じく捨てる
+    for (const [rid, g] of [...got]) if (g.boats.length !== 6) got.delete(rid)
+    console.log(`直前情報をDBから読み込み（${got.size}/${ids.length}レース・公式への取得なし）`)
+  }
+  if (!FROM_DB) console.log(`直前情報を取得中（${ids.length}レース）...`)
   const CONC = 6
-  for (let i = 0; i < ids.length; i += CONC) {
+  for (let i = 0; i < (FROM_DB ? 0 : ids.length); i += CONC) {
     await Promise.all(ids.slice(i, i + CONC).map(async (rid) => {
       const jcd = rid.slice(9, 11), rno = Number(rid.slice(12, 14)), hd = rid.slice(0, 8)
       try {
