@@ -98,6 +98,18 @@ const add = (name, due, ok, detail) => items.push({ name, due, ok, detail })
     ok ? `${(statSync(f).size / 1024).toFixed(0)}KB` : `logs/morning-post-${TODAY}.txt が無い／空`)
 }
 
+// ---------- ⑤' 直前のフルモデル差し替え ----------
+// ★展示が出て締切前のレースがあるのに、差し替えが動いていなければ欠品。
+//   止まっても画面は朝の数字を出し続けるので、見ているだけでは気づけない（2026-10-02）。
+{
+  const watch = HHMM >= '10:30' && HHMM <= '21:00'
+  const f = join(ROOT, 'logs', `chokuzen-${TODAY}.log`)
+  const age = existsSync(f) ? (Date.now() - statSync(f).mtimeMs) / 60000 : null
+  if (!watch) add('直前の予想差し替え', '10:30', true, '見張る時間帯の外')
+  else add('直前の予想差し替え', '10:30', age != null && age <= 20,
+    age == null ? `logs/chokuzen-${TODAY}.log が無い` : `${Math.round(age)}分前に動いた`)
+}
+
 // ---------- ⑥ 再学習 ----------
 {
   const r = one(`SELECT run_at, verdict, adopted FROM model_history ORDER BY run_at DESC LIMIT 1`)
