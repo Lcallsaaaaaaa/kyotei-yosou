@@ -96,7 +96,11 @@ ok('JSONとして読み直せる', Array.isArray(after.races))
 
 const bm = new Map(before.races.map((r) => [r.race_id, r]))
 const changed = after.races.filter((r) => JSON.stringify(bm.get(r.race_id)?.first) !== JSON.stringify(r.first))
-ok('変わったレース数が報告と一致', changed.length === nTarget, `報告${nTarget} / 実際${changed.length}`)
+// ⚠ 「入れ替えた数」と「中身が変わった数」は一致しない。
+//   直前に同じモデル・同じ直前情報で走らせたあとだと、入れ替えても値は同じになる
+//   （2026-10-03に実際にここで落ちた）。見るべきは**対象外のレースを触っていないこと**。
+ok('変わったのは対象レースだけ', changed.every((r) => target.includes(r.race_id)) && changed.length <= nTarget,
+  `入れ替え${nTarget} / 中身が変わった${changed.length}（同じ値なら0でも正しい）`)
 
 // 締切・展示の条件
 const DL = new Map()

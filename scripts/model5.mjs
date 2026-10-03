@@ -48,10 +48,17 @@ const TOPN = Number(flag('top', 30))
 //   ⚠ 展示を入れても1着的中は変わらない（57.18%対57.38%・2026-08-31実測）が、
 //     それは全体の話。**高確率帯の較正は別**で、そこが商品になる部分。
 const MORNING = argv.includes('--morning')
-const NOMORN = /^(bf_|waveb_|windb_|nami5_)/
+//   exc_*     その選手の「展示が示す進入コース」での成績 … 展示が要る（2026-10-02追加）
+const NOMORN = /^(bf_|waveb_|windb_|nami5_|exc_)/
+// ★--drop <正規表現> … その項目を外して学習する（2026-10-02）。
+//   新しい項目を足したとき、**同じ学習期限で、その項目だけ外したモデル**を作って
+//   比べるために要る。期限が違うモデル同士を比べると、何が効いたのか分からない。
+const DROP = (() => { const i = argv.indexOf('--drop'); return i > -1 ? new RegExp(argv[i + 1]) : null })()
 const featCols = all(`PRAGMA table_info(feat)`).map((c) => c.name)
   .filter((c) => !(MORNING && NOMORN.test(c)))
+  .filter((c) => !(DROP && DROP.test(c)))
   .filter((c) => !['race_id', 'lane', 'racer_id', 'course'].includes(c))
+if (DROP) console.log(`  --drop ${DROP} で項目を除外`)
 console.log(`特徴量 ${featCols.length} 項目`)
 
 const q = (k) => '"' + k.replace(/"/g, '""') + '"'

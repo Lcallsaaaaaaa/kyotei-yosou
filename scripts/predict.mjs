@@ -63,7 +63,9 @@ const loadModel = (p) => {
     XOFF: M.xoff }
 }
 const MORN = loadModel(join(ROOT, 'data', 'model5.json'))
-const FULLP = join(ROOT, 'data', 'model5-full.json')
+// ★--full-model <パス> … 試すモデルを指定する（2026-10-02）。
+//   新しい項目を入れたモデルを、本番のファイルを書き換えずに比べるために要る。
+const FULLP = (() => { const i = argv.indexOf('--full-model'); return i > -1 ? argv[i + 1] : join(ROOT, 'data', 'model5-full.json') })()
 const FULL = existsSync(FULLP) ? loadModel(FULLP) : null
 const M = MORN.M          // 番組表の項目名など、モデル共通のものはこちらを見る
 const featIdx = new Map(M.featCols.map((c, i) => [c, i]))
@@ -333,7 +335,7 @@ if (!argv.includes('--nobefore')) {
   //   予想を作り直すだけならDBから読めばよく、公式への取得はゼロで済む。
   const FROM_DB = argv.includes('--before-db')
   if (FROM_DB) {
-    const bi = db.prepare(`SELECT race_id, lane, tilt, parts, weight, ex_time
+    const bi = db.prepare(`SELECT race_id, lane, tilt, parts, weight, ex_time, ex_course
       FROM before_info WHERE substr(race_id,1,8)=?`).all(ymd)
     const br = new Map(db.prepare(`SELECT race_id, air_temp, water_temp, wind_speed, wave
       FROM before_race WHERE substr(race_id,1,8)=?`).all(ymd).map((r) => [r.race_id, r]))
@@ -346,7 +348,8 @@ if (!argv.includes('--nobefore')) {
         got.set(r.race_id, g)
       }
       // 取得側は parts を 1/0 で持つ（中身の文字列ではなく「交換したか」だけ使う）
-      g.boats.push({ lane: r.lane, weight: r.weight, ex: r.ex_time, tilt: r.tilt, parts: r.parts ? 1 : 0 })
+      g.boats.push({ lane: r.lane, weight: r.weight, ex: r.ex_time, tilt: r.tilt,
+        parts: r.parts ? 1 : 0, exc: r.ex_course })
     }
     // 6艇そろっていないレースは、取得側と同じく捨てる
     for (const [rid, g] of [...got]) if (g.boats.length !== 6) got.delete(rid)
@@ -400,7 +403,18 @@ if (!argv.includes('--nobefore')) {
     //   番組表だけの段階では不明として空にしてある。
     if (o._p) { R(o._p.wave.get(waveBk(g.wave)), 'waveb', o); R(o._p.wind.get(windBk(g.wind)), 'windb', o) }
     if (b) { o.bf_parts = b.parts; o.bf_weight = b.weight
-      o.bf_wadj = b.weight != null && o.weight != null ? b.weight - o.weight : null }
+      o.bf_wadj = b.weight != null && o.weight != null ? b.weight - o.weight : null
+      // ★展示の進入コース（2026-10-02）。addbefore.mjs と同じ値を同じ名前で入れること。
+      //   進入は締切後にしか確定しないので、これまでは枠番で代用していた。
+      //   展示の進入は枠番より実際に近く（94.85% 対 90.13%）、前づけのあるレースでは
+      //   枠番だと原理的に0%のところを51.7%当てられる。
+      //   exc_* は「その選手が実際に入るコースでの成績」。モデルは course1_*〜course6_* を
+      //   全部渡されるが、どれが当てはまるかを知らなかった。
+      if (b.exc >= 1 && b.exc <= 6) {
+        o.bf_ex_course = b.exc
+        o.bf_ex_move = b.exc - o.lane
+        if (o._p) R(o._p.course.get(b.exc), 'exc', o)
+      } }
   }
   for (const [rid, g] of got) {
     const valid = g.boats.filter((b) => b.ex && b.ex > 0)
