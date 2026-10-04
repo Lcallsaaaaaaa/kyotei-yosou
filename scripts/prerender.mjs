@@ -189,7 +189,7 @@ for (const n of news) {
 }
 
 // 固定ページ
-for (const slug of ['about', 'privacy']) {
+for (const slug of ['about', 'privacy', 'terms']) {
   const p = doc(`page/${slug}`)
   if (!p?.html) continue
   out(`/${slug}`, page({ path: `/${slug}`, title: p.title, desc: p.description ?? p.title,

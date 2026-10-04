@@ -1216,7 +1216,7 @@
       if (p[0] === 'analysis') return await analysis(p[1])
       if (p[0] === 'member') return await memberPage()
       if (p[0] === 'signup' || p[0] === 'login') return await authPage(p[0])
-      if (p[0] === 'about' || p[0] === 'privacy') return await staticPage(p[0])
+      if (p[0] === 'about' || p[0] === 'privacy' || p[0] === 'terms') return await staticPage(p[0])
       return notFound()
     } catch (e) { fail(e) }
     finally { trackPage() }
