@@ -79,6 +79,37 @@ if ($hm -ge '08:30' -and $hm -le '21:30') {
   }
 }
 
+# ★手元の画面が「生きているのに答えない」を拾う（2026-10-05）。
+#   status.mjs は日に1回ほど静かに死ぬ。プロセスが消えるぶんは下の foreach が
+#   立て直すが、**居るのに応答しない**壊れ方は誰も捕まえられなかった。
+#   ポートを叩いて、答えなければ殺す（下の foreach が立て直す）。
+#   ⚠ Invoke-WebRequest は 5.1 だと既定で IE エンジンを使い、初回に
+#     「初回実行の構成」で固まることがある。-UseBasicParsing を必ず付ける。
+if ($hm -ge '07:30' -and $hm -le '23:00') {
+  $alive = @($cmdlines | Where-Object { $_ -match 'status.mjs' }).Count -gt 0
+  if ($alive) {
+    $answered = $false
+    try {
+      $r = Invoke-WebRequest -Uri 'http://127.0.0.1:3940/haishin' -TimeoutSec 10 -UseBasicParsing
+      if ($r.StatusCode -eq 200) { $answered = $true }
+    } catch { $answered = $false }
+    if (-not $answered) {
+      $wedged = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
+        Where-Object { $_.CommandLine -match 'status.mjs' })
+      foreach ($p in $wedged) {
+        try {
+          Stop-Process -Id $p.ProcessId -Force
+          "$(Get-Date -Format 'HH:mm:ss') killed wedged status (PID $($p.ProcessId), port 3940 no answer)" |
+            Add-Content $wlog -Encoding utf8
+        } catch {
+          "$(Get-Date -Format 'HH:mm:ss') FAILED to kill status: $_" | Add-Content $wlog -Encoding utf8
+        }
+      }
+      $cmdlines = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" | ForEach-Object { $_.CommandLine })
+    }
+  }
+}
+
 # ★-RedirectStandardOutput は追記ではなく「上書き」する。
 #   2026-08-23 に auto-bet が死んで再起動した際、朝からの記録が全部消えて
 #   死んだ原因を追えなくなった。再起動ごとに別ファイルへ書き、後で結合する。

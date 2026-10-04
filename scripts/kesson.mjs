@@ -147,6 +147,30 @@ const add = (name, due, ok, detail) => items.push({ name, due, ok, detail })
   }
 }
 
+// ---------- ⑧ 手元の画面（status.mjs）が開けるか ----------
+// ★ 2026-10-05。「配信のURLにアクセスできない」と言われて調べたら、
+//   status.mjs が死んでいた。watchdog は10分ごとに立て直すが、その穴に
+//   入るとこちらには何も届かない。**買い目があっても読めなければ欠品と同じ。**
+//   日に1回くらい静かに死ぬので、見つけたら先に知らせる。
+{
+  const watch = HHMM >= '07:30' && HHMM <= '23:00'
+  if (!watch) add('手元の画面', '07:30', true, '見張る時間帯の外')
+  else {
+    let ok = false, detail = ''
+    // ⚠ AbortSignal.timeout() は使わない（⑦と同じ理由）
+    const ac = new AbortController()
+    const timer = setTimeout(() => ac.abort(), 8_000)
+    try {
+      const res = await fetch('http://127.0.0.1:3940/haishin', { signal: ac.signal, cache: 'no-store' })
+      ok = res.ok
+      detail = ok ? 'localhost:3940 は開けます' : `開けません（${res.status}）`
+    } catch {
+      detail = 'localhost:3940 が答えません（status.mjs が落ちています）'
+    } finally { clearTimeout(timer) }
+    add('手元の画面', '07:30', ok, detail)
+  }
+}
+
 db.close()
 
 // ---------- まとめ ----------
