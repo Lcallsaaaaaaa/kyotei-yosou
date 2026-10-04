@@ -6,6 +6,9 @@
 
 # データ・学習モデル・予想ファイル
 data/
+# ⚠ 上の data/ は site/functions/data/ にも当たる。そこには**会員と無料枠の判定**が
+#   入っているのに、2026-10-05まで一度も git に載っていなかった。ここだけ戻す。
+!site/functions/data/
 
 # 実行ログ
 logs/
@@ -54,3 +57,7 @@ site/**/*.html
 
 # 公開用に組み立てたフォルダ（deploy.mjs が毎回作り直す）
 build/
+
+# wrangler pages dev が置いていく作業用（公開にも git にも入れない）
+.wrangler/
+site/.wrangler/

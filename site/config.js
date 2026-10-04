@@ -16,6 +16,12 @@ window.NAGI = {
   supabaseAnonKey: 'sb_publishable_tDZtdMhMYU4oDBEXSIPIAg_lYyRRFHL',
   noteUrl: '',          // 会員（月300円）を売る note のメンバーシップのURL（空なら案内ボタンを出さない）
 
+  // ---- LINE（無料の入口）----
+  //   LCall の振り分けURL。叩くたびに複数の公式アカウントへ散らすので、
+  //   1アカウントの無料通数（200通/月）に当たりにくい。
+  //   ⚠ 中身は 307 で lin.ee/… に飛ぶだけ。ここに個人情報は乗らない。
+  lineAddUrl: 'https://teru.lcall.shop/api/distribute?l=j4ksg3',
+
   // ---- 検索とアクセス解析 ----
   siteName: 'ボートレース研究所',
   siteUrl: '',          // 例 'https://nagi-kyotei.com'（末尾のスラッシュなし）

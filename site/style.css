@@ -966,3 +966,17 @@ main,
   background: var(--accent-strong);
 }
 .skip:focus { top: 8px; }
+
+/* LINEの友だち追加ボタン。LINEの指定色（#06C755）。
+   ⚠ 上の :root[data-theme=...] .cta は (0,2,0) で .cta.line と同じ強さなので、
+      必ずこの位置（ファイル末尾）に置く。前に出すと色が戻る。 */
+.cta.line,
+:root:not([data-theme="light"]) .cta.line,
+:root[data-theme="dark"] .cta.line {
+  background: #06c755;
+  color: #ffffff;
+  box-shadow: 0 7px 16px rgba(6, 199, 85, .25);
+}
+
+/* 表が画面より広いときは、その表の中だけ横に動かす（ページ全体を横に動かさない） */
+.tw { overflow-x: auto; }

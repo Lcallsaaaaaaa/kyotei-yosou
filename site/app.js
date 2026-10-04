@@ -99,6 +99,25 @@
   // 月300円の会員（合言葉）とは別のしくみ。Supabase の認証だけを使う。
   // 無料枠（単勝1点）は member/ 置き場にあり、Pages Functions が本人確認してから返す。
   // 画面だけで隠すのではなく、**置き場の手前で止めている**ので、URLを直接叩いても取れない。
+  // ---------- LINEのリッチメニューから渡される合言葉 ----------
+  // ★なぜ合言葉か（2026-10-05）
+  //   友だち追加は LCall で複数の公式アカウントへ散らす。LINEログインは
+  //   1チャネル＝1公式に紐づくので、散らすのと噛み合わない。
+  //   そこで「友だちにしか見えないリッチメニューのURL」を鍵にする。
+  //   例 https://…/tansho?k=xxxx
+  //   ⚠ URLに鍵が残ったままだと、画面を人に見せたときに写る。拾ったら即消す。
+  const FKEY = 'nagi_free_key'
+  const freeKey = () => { try { return localStorage.getItem(FKEY) || '' } catch { return '' } }
+  function catchFreeKey() {
+    const u = new URL(location.href)
+    const k = u.searchParams.get('k')
+    if (!k) return
+    try { localStorage.setItem(FKEY, k) } catch { /* 保存できなくてもこの回は動く */ }
+    u.searchParams.delete('k')
+    history.replaceState(null, '', u.pathname + (u.search || '') + u.hash)
+  }
+  catchFreeKey()
+
   const SESS = 'nagi_session'
   const sbUrl = (C.supabaseUrl || '').replace(/\/+$/, '')
   const sbKey = C.supabaseAnonKey || ''
@@ -138,10 +157,18 @@
   }
   /** メール登録した人向けのデータ。未登録なら null（画面側で案内を出す）。 */
   async function memberDoc(key) {
-    const t = await accessToken()
-    if (!t) return null
-    const r = await fetch(`/data/${key}.json`, { headers: { Authorization: 'Bearer ' + t } })
-    if (r.status === 401) { setSession(null); return null }
+    // 合言葉があればそれで取る（LINEの友だち）。無ければ以前のメール登録を見る。
+    const k = freeKey()
+    const t = k ? null : await accessToken()
+    if (!k && !t) return null
+    const h = k ? { 'x-free-key': k } : { Authorization: 'Bearer ' + t }
+    const r = await fetch(`/data/${key}.json`, { headers: h })
+    if (r.status === 401) {
+      // 合言葉が古い（鍵を変えた）ときは消す。黙って通らないままにしない。
+      if (k) { try { localStorage.removeItem(FKEY) } catch { /* 消せなくても案内は出る */ } }
+      else setSession(null)
+      return null
+    }
     return r.ok ? r.json() : null
   }
   const signedIn = () => !!session()?.token
@@ -1076,11 +1103,56 @@
 
   // ---------- メール登録・ログインの画面 ----------
   /** 未登録の人に出す案内。 */
-  const signupPanel = (what) => `<div class="panel lock"><b>${esc(what)}は登録した方にお見せしています</b>
-    <p>メールアドレスの登録（無料）で、その日の無料予想がすべて見られます。
-      登録は1分で終わり、費用はかかりません。</p>
-    <p><a class="cta" href="/signup">無料で登録する</a>
-      <a class="cta ghost" href="/login">登録済みの方はこちら</a></p></div>`
+  const signupPanel = (what) => `<div class="panel lock"><b>${esc(what)}はLINEでお届けしています</b>
+    <p>LINEの友だち追加（無料）で、<b>その日の無料予想</b>が毎朝10時に届きます。
+      メニューからいつでも見直せます。費用はかかりません。</p>
+    <p>${lineBtn('LINEで無料予想を受け取る')}</p>
+    <p class="sub">舟券の購入は20歳からです。追加をもって
+      <a href="/terms">利用規約</a>と<a href="/privacy">プライバシーポリシー</a>に同意いただいたものとします。</p></div>`
+
+  /** LINE追加のボタン。URL未設定のときは押せるものを出さない（死んだボタンを置かない）。 */
+  const lineBtn = (label) => C.lineAddUrl
+    ? `<a class="cta line" href="${esc(C.lineAddUrl)}" target="_blank" rel="noopener">${esc(label)}</a>`
+    : '<span class="sub">いま友だち追加を受け付けられません。時間をおいてお試しください。</span>'
+
+  /** LINEの入口。ここは検索に出す（無料予想を取る導線なので）。 */
+  async function linePage() {
+    setNav('')
+    meta('LINEで無料予想を受け取る',
+      'ボートレース研究所の無料予想（単勝1点・1着確率80%以上の本命だけ）を、LINEで毎朝10時にお届けします。費用はかかりません。',
+      { canonical: '/line' })
+    const have = !!freeKey()
+    view(`<h1>LINEで無料予想を受け取る</h1>
+      ${have ? '<div class="panel"><p><b>受け取れる状態です。</b></p><p class="sub">その日の無料予想は<a href="/">トップ</a>から見られます。</p></div>' : ''}
+      <div class="panel">
+        <p>友だち追加（無料）で、こちらが届きます。</p>
+        <ul>
+          <li><b>毎朝10時</b>　その日の<b>無料予想</b>（単勝1点・1着確率80%以上の本命だけ）</li>
+          <li><b>メニューから</b>　いつでも見直せます。前日の結果も見られます</li>
+          <li><b>費用はかかりません</b>　いつでもブロックで止まります</li>
+        </ul>
+        <p>${lineBtn('LINEで友だち追加する')}</p>
+      </div>
+      <h2>無料と会員のちがい</h2>
+      <div class="tw"><table class="t"><thead><tr><th>　</th><th>無料（LINE）</th><th>会員（月300円）</th></tr></thead>
+        <tbody>
+          <tr><th>無料予想（単勝1点）</th><td>○</td><td>○</td></tr>
+          <tr><th>各レースの1着確率</th><td>―</td><td>○</td></tr>
+          <tr><th>展開予想（全レース）</th><td>―</td><td>○</td></tr>
+          <tr><th>AI予想（3連複2点）</th><td>―</td><td>○</td></tr>
+        </tbody></table></div>
+      <p><a href="/member">会員について見る →</a></p>
+      <h2>先に知っておいていただきたいこと</h2>
+      <ul>
+        <li><b>舟券の購入は20歳からです。</b>20歳未満の方は追加をご遠慮ください</li>
+        <li>予想は的中を約束するものではありません。<b>回収率は100%未満です</b>。
+          外れた日も消さずに<a href="/results">実績</a>に残しています</li>
+        <li>お預かりするのは<b>LINEのユーザーID・表示名・画像URL</b>だけです。
+          本名・住所・電話番号・お支払い情報は受け取りません（<a href="/privacy">詳しく</a>）</li>
+        <li>他社の広告はお送りしません</li>
+      </ul>
+      <p class="sub">追加をもって<a href="/terms">利用規約</a>と<a href="/privacy">プライバシーポリシー</a>に同意いただいたものとします。</p>`)
+  }
 
   async function authPage(kind) {
     setNav('')
@@ -1110,7 +1182,7 @@
         </div>
         <p><button type="button" class="cta" id="au-go">${isUp ? '登録する' : 'ログインする'}</button></p>
         <p id="au-msg" class="sub"></p>
-        <p class="sub">${isUp ? '登録済みの方は <a href="/login">ログイン</a>' : 'はじめての方は <a href="/signup">無料で登録</a>'}</p>
+        <p class="sub">はじめての方は <a href="/line">LINEで無料予想を受け取る</a></p>
       </div>
       <p class="note">お預かりするのはメールアドレスだけです。使い道と消し方は
         <a href="/privacy">プライバシーポリシー</a>に書いています。パスワードは Supabase 側で保管され、当サイトは見られません。</p>`)
@@ -1187,6 +1259,7 @@
     const href = a?.getAttribute('href')
     if (!href) return
     if (C.noteUrl && href === C.noteUrl) track('member_click', { page_path: location.pathname })   // 申し込みへ進んだ数
+    if (C.lineAddUrl && href === C.lineAddUrl) track('line_click', { page_path: location.pathname })   // LINEへ進んだ数
     if (href === '/member') track('member_page', { page_path: location.pathname })
     if (!href.startsWith('/') || a.target === '_blank') return
     e.preventDefault(); moved = true; navTo(href)
@@ -1215,7 +1288,10 @@
       if (p[0] === 'meeting') return await meeting(Number(p[1]), p[2])
       if (p[0] === 'analysis') return await analysis(p[1])
       if (p[0] === 'member') return await memberPage()
-      if (p[0] === 'signup' || p[0] === 'login') return await authPage(p[0])
+      if (p[0] === 'line') return await linePage()
+      // 旧 /signup（メール登録）で来た人は LINE へ送る。リンクを死なせない。
+      if (p[0] === 'signup') return navTo('/line', true)
+      if (p[0] === 'login') return await authPage('login')
       if (p[0] === 'about' || p[0] === 'privacy' || p[0] === 'terms') return await staticPage(p[0])
       return notFound()
     } catch (e) { fail(e) }
