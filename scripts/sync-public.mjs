@@ -283,6 +283,11 @@ async function syncDay(date, withRacers) {
     F.member_only = !!(gachigachi?.races?.length || ana?.races?.length)
     void pub
   }
+  // ★無料枠は、有料会員にも開けるようにする（2026-10-05）
+  //   無料枠の鍵は LINE 側（FREE_KEY）にしかなく、合言葉では開けなかった。
+  //   **お金を払った人が無料予想を見られない**という逆さまの状態だったので、
+  //   同じ中身を paid/ にも入れて、合言葉でも開くようにする。
+  if (member.length) paid.push([`paid/free/${date}`, { date, count: member.length, picks: member }])
   docs.unshift([`races/${date}`, races], [`tenkai/${date}`, tk], [`features/${date}`, F])
   await put(docs)
   await putPaid(paid, date)

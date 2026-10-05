@@ -15,7 +15,8 @@
 // ★設定（Cloudflare Pages → Settings → Functions）
 //   R2 bucket bindings : 変数名 DATA ／ バケット kyotei-data
 //   Environment variables :
-//     FREE_KEY      … LINEのリッチメニューのURLに入れる合言葉（?k=… / x-free-key）
+//     FREE_SECRET   … LINEの月替わりの鍵のもと（node scripts/free-key.mjs --env で出る）
+//     FREE_KEY      … 旧・固定の鍵。FREE_SECRET に移ったら消してよい
 //     SUPABASE_URL  … https://xxxx.supabase.co（以前のメール登録者ぶん。無くてよい）
 //     SUPABASE_KEY  … publishable（公開用）の鍵（同上）
 //   どれも未設定だと member/ は開けません（誰にも返しません）。
@@ -45,17 +46,54 @@ async function signedIn(request, env) {
 /** リッチメニューの合言葉が合っているか。
  *  ⚠ 長さ比較で先に落とすと、長さだけは漏れる。timingSafeEqual が無いので、
  *     長さを揃えずに全文字を走査して差をためる（早抜けしない）。 */
-function hasFreeKey(request, env, url) {
-  const want = env.FREE_KEY
-  if (!want) return false
+const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)))
+  .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+
+/** その月の鍵を作る。scripts/free-key.mjs と同じ計算にすること。 */
+async function freeKeyOf(secret, period) {
+  const k = await crypto.subtle.importKey('raw', hexBytes(secret),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  const sig = await crypto.subtle.sign('HMAC', k, new TextEncoder().encode('freekey:' + period))
+  return b64u(sig).slice(0, 22)
+}
+const hexBytes = (hex) => {
+  const a = new Uint8Array(hex.length / 2)
+  for (let i = 0; i < a.length; i++) a[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16)
+  return a
+}
+/** いま有効な月。月初7日間は先月も通す（リッチメニューの貼り替えが遅れても止めないため）。 */
+function periodsNow() {
+  // ⚠ UTCで月を出すと、JSTの深夜0〜9時に前月と判定される。+9時間してから見る。
+  const d = new Date(Date.now() + 9 * 3600e3)
+  const p2 = (n) => String(n).padStart(2, '0')
+  const y = d.getUTCFullYear(), m = d.getUTCMonth() + 1
+  const cur = `${y}-${p2(m)}`
+  if (d.getUTCDate() > 7) return [cur]
+  const py = m === 1 ? y - 1 : y, pm = m === 1 ? 12 : m - 1
+  return [cur, `${py}-${p2(pm)}`]
+}
+/** 早抜けしない突き合わせ（長さの違いも差に含める）。 */
+const same = (got, want) => {
+  let diff = got.length ^ want.length
+  for (let i = 0; i < got.length; i++) diff |= got.charCodeAt(i) ^ want.charCodeAt(i % want.length)
+  return diff === 0
+}
+
+async function hasFreeKey(request, env, url) {
   // ⚠ 「ヘッダ || ?k=」にすると、古い鍵がヘッダに入っているだけで
   //    新しい ?k= を見ないまま断ってしまう。**どちらか合っていれば通す**。
-  return [request.headers.get('x-free-key'), url.searchParams.get('k')].some((got) => {
-    if (got == null) return false
-    let diff = got.length ^ want.length
-    for (let i = 0; i < got.length; i++) diff |= got.charCodeAt(i) ^ want.charCodeAt(i % want.length)
-    return diff === 0
-  })
+  const given = [request.headers.get('x-free-key'), url.searchParams.get('k')].filter((x) => x != null)
+  if (!given.length) return false
+  // 月替わり（2026-10-05〜）。FREE_SECRET から毎月の鍵を作る。
+  if (env.FREE_SECRET) {
+    for (const period of periodsNow()) {
+      const want = await freeKeyOf(env.FREE_SECRET, period)
+      if (given.some((g) => same(g, want))) return true
+    }
+  }
+  // 固定鍵（移行のあいだの保険）。FREE_SECRET に移ったら消してよい。
+  if (env.FREE_KEY && given.some((g) => same(g, env.FREE_KEY))) return true
+  return false
 }
 
 export async function onRequestGet({ params, env, request }) {
@@ -66,7 +104,7 @@ export async function onRequestGet({ params, env, request }) {
 
   const isMember = path.startsWith('member/')
   // 合言葉を先に見る（外へ問い合わせないので速い）。駄目なら以前のメール登録を見る。
-  if (isMember && !hasFreeKey(request, env, new URL(request.url)) && !(await signedIn(request, env)))
+  if (isMember && !(await hasFreeKey(request, env, new URL(request.url))) && !(await signedIn(request, env)))
     return new Response(JSON.stringify({ error: 'line_required' }),
       { status: 401, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } })
 

@@ -13,7 +13,18 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const mod = await import(pathToFileURL(join(ROOT, 'site', 'functions', 'data', '[[path]].js')).href)
 
+const SECRET = '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff'
 const KEY = 'test-key-ABC123'
+// 月替わりの鍵（scripts/free-key.mjs と同じ計算）。窓口が同じ値を出せるかを確かめる。
+const { createHmac } = await import('node:crypto')
+const p2 = (n) => String(n).padStart(2, '0')
+const jd = new Date(Date.now() + 9 * 3600e3)
+const THIS = `${jd.getUTCFullYear()}-${p2(jd.getUTCMonth() + 1)}`
+const PREV = jd.getUTCMonth() === 0 ? `${jd.getUTCFullYear() - 1}-12` : `${jd.getUTCFullYear()}-${p2(jd.getUTCMonth())}`
+const NEXT = jd.getUTCMonth() === 11 ? `${jd.getUTCFullYear() + 1}-01` : `${jd.getUTCFullYear()}-${p2(jd.getUTCMonth() + 2)}`
+const monthKey = (period) => createHmac('sha256', Buffer.from(SECRET, 'hex'))
+  .update('freekey:' + period).digest('base64url').slice(0, 22)
+const DAY = jd.getUTCDate()
 // R2 の代わり。member/free/… と races/… だけ「ある」ことにする。
 const DATA = {
   async get(path) {
@@ -36,7 +47,7 @@ const call = async (path, { key, qkey, bearer, env: extra } = {}) => {
   const h = new Headers()
   if (key != null) h.set('x-free-key', key)
   if (bearer) h.set('authorization', 'Bearer ' + bearer)
-  const env = { DATA, FREE_KEY: KEY, SUPABASE_URL: 'https://sb.test', SUPABASE_KEY: 'anon', ...extra }
+  const env = { DATA, FREE_KEY: KEY, FREE_SECRET: SECRET, SUPABASE_URL: 'https://sb.test', SUPABASE_KEY: 'anon', ...extra }
   const params = { path: path.split('?')[0].split('/') }
   return mod.onRequestGet({ params, env, request: new Request(u, { headers: h }) })
 }
@@ -65,6 +76,21 @@ await T('ヘッダの前後の空白は落ちるので 200', 200, () => call(F, 
 await T('?k= の前後に空白 → 401', 401, () => call(F, { qkey: ' ' + KEY + ' ' }))
 await T('鍵の1文字を変える → 401', 401, () => call(F, { key: KEY.slice(0, -1) + 'Z' }))
 await T('ヘッダと?k=の両方（片方だけ正）→ 200', 200, () => call(F, { key: 'wrong', qkey: KEY }))
+
+console.log('■ 月替わりの鍵（2026-10-05〜）')
+await T('今月の鍵 → 200', 200, () => call(F, { key: monthKey(THIS) }))
+await T('今月の鍵（?k=） → 200', 200, () => call(F, { qkey: monthKey(THIS) }))
+await T('来月の鍵はまだ通らない → 401', 401, () => call(F, { key: monthKey(NEXT) }))
+await T(`先月の鍵は${DAY <= 7 ? '7日まで通る' : '通らない'} → ${DAY <= 7 ? 200 : 401}`,
+  DAY <= 7 ? 200 : 401, () => call(F, { key: monthKey(PREV) }))
+await T('よその秘密で作った鍵 → 401', 401,
+  () => call(F, { key: monthKey(THIS), env: { FREE_SECRET: 'ff'.repeat(32) } }))
+await T('FREE_SECRET 未設定でも旧FREE_KEYは通る → 200', 200,
+  () => call(F, { key: KEY, env: { FREE_SECRET: undefined } }))
+await T('FREE_SECRET だけ（旧鍵なし）で今月の鍵 → 200', 200,
+  () => call(F, { key: monthKey(THIS), env: { FREE_KEY: undefined } }))
+await T('両方なし → 401', 401,
+  () => call(F, { key: monthKey(THIS), env: { FREE_KEY: undefined, FREE_SECRET: undefined } }))
 
 console.log('■ 以前のメール登録（Supabase）')
 await T('正しい入場券 → 200', 200, () => call(F, { bearer: 'good-1' }))

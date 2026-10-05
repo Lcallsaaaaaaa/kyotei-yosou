@@ -156,19 +156,27 @@
     return saveFrom(j)?.token ?? (setSession(null), null)
   }
   /** メール登録した人向けのデータ。未登録なら null（画面側で案内を出す）。 */
+  /** 無料枠（単勝1点）を取る。LINEの鍵 → 有料会員の合言葉 → 以前のメール登録、の順に試す。
+   *  ★有料会員にも必ず見せる（2026-10-05）。以前は LINE の鍵しか通らず、
+   *    **お金を払った人が無料予想を見られない**という逆さまの状態だった。 */
   async function memberDoc(key) {
-    // 合言葉があればそれで取る（LINEの友だち）。無ければ以前のメール登録を見る。
     const k = freeKey()
-    const t = k ? null : await accessToken()
-    if (!k && !t) return null
-    const h = k ? { 'x-free-key': k } : { Authorization: 'Bearer ' + t }
-    const r = await fetch(`/data/${key}.json`, { headers: h })
-    if (r.status === 401) {
-      // 合言葉が古い（鍵を変えた）ときは消す。黙って通らないままにしない。
-      if (k) { try { localStorage.removeItem(FKEY) } catch { /* 消せなくても案内は出る */ } }
-      else setSession(null)
-      return null
+    if (k) {
+      const r = await fetch(`/data/${key}.json`, { headers: { 'x-free-key': k } })
+      if (r.ok) return r.json()
+      // 鍵が古い（毎月変わる）ときは捨てる。黙って通らないままにしない。
+      if (r.status === 401) { try { localStorage.removeItem(FKEY) } catch { /* 消せなくても案内は出る */ } }
     }
+    // 有料会員は合言葉で開く。中身は paid/ 側に同じものが入っている。
+    const m = key.match(/^member\/free\/(\d{4}-\d{2}-\d{2})$/)
+    if (m && memberState()) {
+      const box = await paidDoc(`paid/free/${m[1]}`)
+      if (box) return box
+    }
+    const t = await accessToken()
+    if (!t) return null
+    const r = await fetch(`/data/${key}.json`, { headers: { Authorization: 'Bearer ' + t } })
+    if (r.status === 401) { setSession(null); return null }
     return r.ok ? r.json() : null
   }
   const signedIn = () => !!session()?.token
