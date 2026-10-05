@@ -107,16 +107,25 @@ function assertNoPaid(key, obj) {
 const LOCK = join(ROOT, 'data', 'sync-public.lock')
 if (!LOCAL) {
   const stale = 40 * 60_000   // 置き去りの鍵は40分で無効（1周は長くても20分ほど）
+  // ★持ち主がもう居なければ、待たずに引き継ぐ（2026-10-05）
+  //   強制終了（Stop-Process -Force / taskkill）だと後始末が走らず鍵が残る。
+  //   実際、入れ替えのために kill したら watchdog が立て直すたびに鍵で弾かれ、
+  //   40分なにも動かない状態になった。**PIDが生きているかで見る。**
+  const alive = (pid) => { try { process.kill(pid, 0); return true } catch (e) { return e.code === 'EPERM' } }
   if (existsSync(LOCK)) {
     const age = Date.now() - statSync(LOCK).mtimeMs
-    let holder = ''
-    try { holder = JSON.parse(readFileSync(LOCK, 'utf8')).mode ?? '' } catch { /* 壊れていても年齢で判断する */ }
-    if (age < stale) {
+    let holder = '', pid = null
+    try { const j = JSON.parse(readFileSync(LOCK, 'utf8')); holder = j.mode ?? ''; pid = j.pid ?? null } catch { /* 壊れていても年齢で判断する */ }
+    if (pid && !alive(pid)) {
+      console.error(`※ 置き去りの鍵（${holder || '不明'}・PID ${pid} はもう居ません）を引き継ぎます`)
+      try { rmSync(LOCK) } catch { /* 消せなくても下で上書きする */ }
+    } else if (age < stale) {
       console.error(`ほかの送信（${holder || '不明'}）が ${Math.round(age / 60000)} 分前から走っています。重ねると送信済みの記録が壊れるので止めます。`)
       console.error('どうしても動かすなら、先に相手を止めるか data/sync-public.lock を消してください。')
       process.exit(1)
+    } else {
+      console.error(`※ 置き去りの鍵（${Math.round(age / 60000)}分前）を引き継ぎます`)
     }
-    console.error(`※ 置き去りの鍵（${Math.round(age / 60000)}分前）を引き継ぎます`)
   }
   const touch = () => { try { writeFileSync(LOCK, JSON.stringify({ mode: LIVE ? '--live' : '--once', pid: process.pid, at: new Date().toISOString() })) } catch { /* 書けなくても動かす */ } }
   touch()
@@ -495,5 +504,12 @@ for (;;) {
     else await syncMeta([addDays(d0, -1), d0, addDays(d0, 1)])
     if (sent > before) log(`送信 ${sent - before}件`)
   } catch (e) { log('失敗:', e.message) }
+  // ★1周終わったことを必ず記録する（2026-10-05・これが2時間停止の真因）
+  //   state は put() の中、**送るものがあったときだけ**書いていた。
+  //   夕方に変化が無い時間が続くと、元気に回っているのにファイルが古いまま。
+  //   watchdog はそれを「固まっている」と見て**健康なプロセスを殺していた**。
+  //   13:13に最後の送信 → 13:41に「28分鼓動なし」で kill、そこから立て直し地獄。
+  //   鼓動は「何か送った」ではなく「1周終わった」で打つ。
+  try { writeFileSync(STATE, JSON.stringify(state)) } catch { /* 書けなくても送信は続ける */ }
   await sleep(3 * 60_000)
 }
