@@ -15,7 +15,7 @@
 //   ・無料枠を守るため、中身が変わっていないものは送らない（前回の中身の指紋と比べる）。
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, rmSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { apiRoute } from './api.mjs'
@@ -97,6 +97,33 @@ function assertNoPaid(key, obj) {
   // 無料枠の単勝1点は member/（メール登録した人向け）へ、それ以外は paid/（月300円）へ回す。
   for (const bad of ['"win_probability"', '"probability"', '"tenkai":{', '"honmei"'])
     if (s.includes(bad)) throw new Error(`${key} に予想の数字 ${bad} が入っている。送らずに止める`)
+}
+
+// ---------- 二重起動を止める ----------
+// ★ --once と --live が同時に走ると、どちらも起動時に state を読んで終わりに書き戻すので、
+//   **後から書いたほうが相手の指紋を消す**。消えた指紋は「変化あり」と見なされて
+//   全件送り直しになり、逆に残ってしまうと変わったのに送られない。
+//   10/05に実際に2回やってしまった。鍵をかけて、重なったら後から来たほうが降りる。
+const LOCK = join(ROOT, 'data', 'sync-public.lock')
+if (!LOCAL) {
+  const stale = 40 * 60_000   // 置き去りの鍵は40分で無効（1周は長くても20分ほど）
+  if (existsSync(LOCK)) {
+    const age = Date.now() - statSync(LOCK).mtimeMs
+    let holder = ''
+    try { holder = JSON.parse(readFileSync(LOCK, 'utf8')).mode ?? '' } catch { /* 壊れていても年齢で判断する */ }
+    if (age < stale) {
+      console.error(`ほかの送信（${holder || '不明'}）が ${Math.round(age / 60000)} 分前から走っています。重ねると送信済みの記録が壊れるので止めます。`)
+      console.error('どうしても動かすなら、先に相手を止めるか data/sync-public.lock を消してください。')
+      process.exit(1)
+    }
+    console.error(`※ 置き去りの鍵（${Math.round(age / 60000)}分前）を引き継ぎます`)
+  }
+  const touch = () => { try { writeFileSync(LOCK, JSON.stringify({ mode: LIVE ? '--live' : '--once', pid: process.pid, at: new Date().toISOString() })) } catch { /* 書けなくても動かす */ } }
+  touch()
+  setInterval(touch, 5 * 60_000).unref()   // 生きているあいだは鍵を新しく保つ
+  const drop = () => { try { if (existsSync(LOCK)) rmSync(LOCK) } catch { /* 消せなくても40分で無効になる */ } }
+  process.on('exit', drop)
+  for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { drop(); process.exit(130) })
 }
 
 // ---------- 送る（または書き出す） ----------
@@ -434,6 +461,14 @@ if (!LIVE) {
 // 常駐：3分ごとに、その日のレースで中身が変わったもの（直前情報・結果・オッズの反映など）だけ送る。
 // 選手・場・実績は1日1回（日付が変わった最初の回と、毎朝7時台）。
 log('=== 公開データの送信（常駐）===')
+// ★起動した時点で鼓動を打つ（2026-10-05）
+//   watchdog は data/sync-public-state.json の更新時刻を鼓動として見ている。
+//   ところが**立て直した直後の1周は丸ごと送り直すので10分以上かかる**。
+//   その間ファイルは古いままなので、watchdog は「まだ止まっている」と見て
+//   10分後にまた殺す。**立ち上がっては殺されるだけ**になり、
+//   10/05は13:41〜15:13に10回繰り返してサイトが2時間止まった。
+//   起動した瞬間に触っておけば、生きていることがすぐ伝わる。
+try { writeFileSync(STATE, JSON.stringify(state)) } catch { /* 書けなくても送信は続ける */ }
 let lastFull = ''
 for (;;) {
   try {

@@ -26,6 +26,26 @@ const VENUES = ['', '桐生', '戸田', '江戸川', '平和島', '多摩川', '
   '尼崎', '鳴門', '丸亀', '児島', '宮島', '徳山', '下関', '若松', '芦屋', '福岡', '唐津', '大村']
 
 if (!existsSync(LOCAL)) { console.error('site/_local がありません。先に node scripts/sync-public.mjs --local'); process.exit(1) }
+// ★古いまま書き出さない（2026-10-05）
+//   10/05、固定ページ（このサイトについて・規約・プライバシー）を書き換えて
+//   R2 には届いていたのに、**書き出したHTMLは9日前の中身のまま**だった。
+//   画面はR2から読むので人には新しく見えるが、**検索エンジンが見るのは古いほう**。
+//   SEOのためのサイトでこれは致命的なので、古かったら止める。
+// 固定ページ（about/privacy/terms）は原稿から直に読むので、ここでは見ない。
+// レース・ニュース・場・選手は site/_local が元なので、そこが古いと
+// **古い出走表を書き出して検索エンジンに出し続ける**。いちばん新しい日付で見る。
+{
+  const ages = readdirSync(LOCAL).filter((f) => f.startsWith('races__'))
+    .map((f) => (Date.now() - statSync(join(LOCAL, f)).mtimeMs) / 3600e3)
+  const newest = ages.length ? Math.min(...ages) : null
+  if ((newest == null || newest > 24) && !process.argv.includes('--force')) {
+    console.error(`site/_local のレースが ${newest == null ? '見つかりません' : Math.round(newest) + '時間前のもの'}。`)
+    console.error('そのまま書き出すと、検索エンジンに古い出走表を見せ続けます。')
+    console.error('  直す： node scripts/sync-public.mjs --once --write-local')
+    console.error('  承知のうえで進める： node scripts/prerender.mjs --force')
+    process.exit(1)
+  }
+}
 const cfg = (() => { const w = {}; new Function('window', readFileSync(join(SITE, 'config.js'), 'utf8'))(w); return w.NAGI ?? {} })()
 const BASE = (cfg.siteUrl || '').replace(/\/+$/, '')
 const SITE_NAME = cfg.siteName || 'ボートレース研究所'
@@ -189,11 +209,18 @@ for (const n of news) {
 }
 
 // 固定ページ
-for (const slug of ['about', 'privacy', 'terms']) {
-  const p = doc(`page/${slug}`)
-  if (!p?.html) continue
-  out(`/${slug}`, page({ path: `/${slug}`, title: p.title, desc: p.description ?? p.title,
-    body: `<article><h1>${esc(p.title)}</h1>${p.html}</article>` }))
+// ★原稿（content/pages/*.md）から直に読む（2026-10-05）
+//   以前は site/_local 経由だったので、R2 には新しい中身が届いているのに
+//   **書き出したHTMLだけ9日前のまま**になっていた。人には新しく見えて、
+//   検索エンジンには古いものを見せ続ける。元が手元にあるのだから直接読む。
+{
+  const { loadDir } = await import('./md.mjs')
+  for (const p of loadDir(join(ROOT, 'content', 'pages'))) {
+    if (!p?.html) continue
+    const title = p.meta.title ?? p.slug
+    out(`/${p.slug}`, page({ path: `/${p.slug}`, title, desc: p.meta.description ?? p.summary ?? title,
+      body: `<article><h1>${esc(title)}</h1>${p.html}</article>` }))
+  }
 }
 
 // 一覧・そのほか（中身は軽いが、題と説明だけでも入れておく）

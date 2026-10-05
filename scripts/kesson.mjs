@@ -193,12 +193,20 @@ writeFileSync(join(ROOT, 'data', 'kesson.json'), JSON.stringify(
 
 // ---------- 知らせる ----------
 // 同じ欠品を何度も知らせない。前回と顔ぶれが変わったときだけ鳴らす。
+// ★ただし「直っていない」ときは2時間ごとに鳴らし直す（2026-10-05）
+//   10/05、サイトの更新が13:13で止まったのを13:30に1回だけ知らせ、
+//   そのあと**2時間なにも言わなかった**。顔ぶれが変わらないので黙る作りだった。
+//   一度きりの知らせは見逃す。直るまでは間隔を空けて鳴らし直す。
+const RENOTIFY_MIN = 120
 if (!QUIET && bad.length) {
   const key = bad.map((x) => x.name).sort().join('|')
   const memo = join(ROOT, 'data', 'kesson-last.json')
   let prev = null
   try { prev = JSON.parse(readFileSync(memo, 'utf8')) } catch { /* 初回 */ }
-  if (prev?.date !== TODAY || prev?.key !== key) {
+  const mins = (hm) => Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3, 5))
+  const stale = prev?.date === TODAY && prev?.key === key && prev?.at
+    && mins(HHMM) - mins(prev.at) >= RENOTIFY_MIN
+  if (prev?.date !== TODAY || prev?.key !== key || stale) {
     writeFileSync(memo, JSON.stringify({ date: TODAY, key, at: HHMM }))
     const text = bad.map((x) => `・${x.name}：${x.detail}`).join('\n')
     appendFileSync(join(ROOT, 'logs', `kesson-${TODAY}.log`), `${HHMM}\n${text}\n\n`, 'utf8')

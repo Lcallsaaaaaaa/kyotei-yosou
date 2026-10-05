@@ -65,9 +65,20 @@ if ($hm -ge '08:30' -and $hm -le '21:30') {
       $stuck = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
         Where-Object { $_.CommandLine -match 'sync-public\.mjs.*--live' })
       foreach ($p in $stuck) {
+        # ★立て直した直後は殺さない（2026-10-05）
+        #   最初の1周は丸ごと送り直すので10分以上かかる。その間ファイルは古いままなので、
+        #   鼓動の古さだけで判断すると**立ち上がっては殺されるだけ**になる。
+        #   10/05はこれで13:41〜15:13に10回繰り返し、サイトが2時間止まった。
+        #   プロセス自身の年齢を見て、1周ぶんの猶予（25分）を与える。
+        $aliveMin = ((Get-Date) - $p.CreationDate).TotalMinutes
+        if ($aliveMin -lt 25) {
+          "$(Get-Date -Format 'HH:mm:ss') sync-live は立ち上げて $([int]$aliveMin) 分なので待つ（鼓動は $([int]$age) 分前）" |
+            Add-Content $wlog -Encoding utf8
+          continue
+        }
         try {
           Stop-Process -Id $p.ProcessId -Force
-          "$(Get-Date -Format 'HH:mm:ss') killed stuck sync-live (PID $($p.ProcessId), no beat for $([int]$age) min)" |
+          "$(Get-Date -Format 'HH:mm:ss') killed stuck sync-live (PID $($p.ProcessId), no beat for $([int]$age) min, alive $([int]$aliveMin) min)" |
             Add-Content $wlog -Encoding utf8
         } catch {
           "$(Get-Date -Format 'HH:mm:ss') FAILED to kill sync-live: $_" | Add-Content $wlog -Encoding utf8
