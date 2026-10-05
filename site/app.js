@@ -186,21 +186,21 @@
     const stale = st && date && st.period !== date.slice(0, 7)
     return `<div class="panel lock"><b>${esc(what)}は会員の方だけご覧いただけます</b>
       <p>${stale ? `お手持ちの合言葉は${jaPeriod(st.period)}のものです。${jaPeriod(date.slice(0, 7))}の合言葉を入れてください。`
-        : '月額500円の会員になると、全レースの展開予想とAI予想（3連複2点プラン）がご覧いただけます。'}</p>
+        : '月額500円の会員になると、全レースの展開予想とAI予想（3連複4点＋3連単4点）がご覧いただけます。'}</p>
       <p><a class="cta" href="/member">合言葉を入れる</a>${C.noteUrl ? ` <a class="cta ghost" href="${esc(C.noteUrl)}" target="_blank" rel="noopener">会員になる（月500円）</a>` : ''}</p></div>`
   }
   async function memberPage() {
     setNav('member')
     const st = memberState()
     const now = jstToday().slice(0, 7)
-    meta('会員（月額500円）', '月額500円の会員になると、全レースの展開予想とAI予想（3連複2点プラン）がご覧いただけます。')
+    meta('会員（月額500円）', '月額500円の会員になると、全レースの展開予想とAI予想（3連複4点＋3連単4点）がご覧いただけます。')
     const ok = st && st.period === now
     view(`<h1>会員</h1>
       <div class="panel">${ok ? `<p><b>${jaPeriod(st.period)}の会員として開いています。</b></p>
           <p class="sub">合言葉は毎月変わります。翌月ぶんは月末にnoteのメンバーシップでお知らせします。</p>
           <p><button type="button" class="cta ghost" id="mem-clear">この端末から合言葉を消す</button></p>`
         : `<p>noteのメンバーシップ（月額500円）に入ると、毎月の合言葉が届きます。</p>
-          <p>その合言葉をここに入れると、この端末では<b>その月のあいだ入れ直さずに</b>、全レースの展開予想とAI予想（3連複2点プラン）が開きます。</p>
+          <p>その合言葉をここに入れると、この端末では<b>その月のあいだ入れ直さずに</b>、全レースの展開予想とAI予想（3連複4点＋3連単4点）が開きます。</p>
           ${st ? `<p class="note">いま入っているのは${jaPeriod(st.period)}の合言葉です。今月（${jaPeriod(now)}）ぶんを入れ直してください。</p>` : ''}`}</div>
       ${ok ? '' : `<div class="panel" style="margin-top:12px">
         <label for="mem-in"><b>合言葉</b></label>
@@ -435,10 +435,11 @@
     const nAll = rs.length
     const hasFeat = !!F?.member_only
     const num = (n, unit) => n ? `<span class="mv-n">${n}${unit}</span>` : '<span class="mv-n sub">きょうのぶんは朝に入ります</span>'
-    const p2 = RS?.total?.plan2
+    // 4点に広げた（2026-10-05）。実績も 3連複4点／3連単4点 のほうを出す。
+    const t4 = RS?.total?.trio4, f4 = RS?.total?.trifecta4
     const items = [
       ['展開予想', num(nTenkai, 'レース'), '本線・対抗と、逃げ／差し／まくりの確率'],
-      ['AI予想（3連複2点）', num(nAi, 'レース'), '自信度がしきい値を超えたレースだけ'],
+      ['AI予想（3連複4点＋3連単4点）', num(nAi, 'レース'), '自信度がしきい値を超えたレースだけ'],
       ['1着確率', num(nAll, 'レース'), '6艇ぶんの確率を出走表の中に'],
       ['注目レース', hasFeat ? '<span class="mv-n">ガチガチ・穴</span>' : '<span class="mv-n sub">—</span>', '本命の1着確率で選んだ特集'],
     ]
@@ -451,12 +452,14 @@
       <div class="mv-sample" aria-label="会員ページの見本。数字は伏せてあります">
         <span class="mv-tag">見本</span>
         <div class="mv-rows">
-          <div class="mv-row"><span>○○5R</span><span class="mv-mask">1=2=3</span><span class="mv-mask">1=2=4</span><span class="mv-sub">3連複2点</span></div>
+          <div class="mv-row"><span>○○5R</span><span class="mv-mask">1=2=3</span><span class="mv-mask">1=2=4</span><span class="mv-mask">1=2=5</span><span class="mv-mask">1=3=4</span><span class="mv-sub">3連複4点</span></div>
+          <div class="mv-row"><span>○○5R</span><span class="mv-mask">1-2-3</span><span class="mv-mask">1-3-2</span><span class="mv-mask">1-2-4</span><span class="mv-mask">1-4-2</span><span class="mv-sub">3連単4点</span></div>
           <div class="mv-row"><span>○○5R</span><span class="mv-mask">本命 ●号艇 ●●.●%</span><span class="mv-mask">逃げ ●●%／差し ●●%</span><span class="mv-sub">展開予想</span></div>
         </div>
         <p class="mv-note">数字は会員ページで開きます。合言葉はこの端末の中だけに保存されます。</p>
       </div>
-      ${p2 ? `<p class="mv-rec">直近30日の実測：3連複2点プラン ${p2.races}レース・的中${p2.hit_rate}%・<b>回収${p2.return_rate}%</b>。
+      ${t4 && f4 ? `<p class="mv-rec">直近30日の実測：3連複4点 ${t4.races}レース・的中${t4.hit_rate}%・<b>回収${t4.return_rate}%</b>／
+        3連単4点 的中${f4.hit_rate}%・<b>回収${f4.return_rate}%</b>。
         回収率は100%未満です。外れた日も消さずに<a href="/results">実績</a>に残しています。</p>` : ''}
       <p class="mv-go"><a class="cta" href="/member">会員について →</a>
         <a class="cta ghost" href="/tenkai">展開予想の一覧を見る</a></p></section>`
@@ -642,12 +645,22 @@
     // 会員ぶん（展開予想・AI予想）。合言葉が入っていなければ開かないので null になる
     const paid = (R.member_only || R.has_member_picks || R.has_member_probs) ? await paidDoc(`paid/race/${id}`) : null
     const p2 = paid?.picks?.plan2
-    const aiPick = p2 ? `<div class="panel aipick"><b>AI予想　${esc(p2.name)}</b><span class="badge">自信度 ${p2.confidence}</span>
-      <div class="picks">${p2.picks.map((x) => `<span class="combo">${x.combo.split('=').map((l) => waku(l)).join('')}
-        <small>${pct(x.probability)}</small>${x.hit == null ? '' : x.hit ? `<b class="hit">的中 ${yen(x.payout)}</b>` : '<b class="miss">不的中</b>'}</span>`).join('')}</div>
+    // ★4点まで見せる（2026-10-05 本人判断）
+    //   3連複4点＋3連単4点は前から paid/ に入れて送っていたのに、画面に出していたのは
+    //   上位2点だけだった。会員は**届いているのに見えないもの**にお金を払っていた。
+    //   月500円へ上げるのに合わせて、全部出す。
+    const hs = paid?.picks?.haishin
+    const combos = (list, sep) => list.map((x) => `<span class="combo">${x.combo.split(sep).map((l) => waku(l)).join('')}
+      <small>${pct(x.probability)}</small>${x.hit == null ? '' : x.hit ? `<b class="hit">的中 ${yen(x.payout)}</b>` : '<b class="miss">不的中</b>'}</span>`).join('')
+    const aiPick = hs ? `<div class="panel aipick"><b>AI予想</b><span class="badge">自信度 ${hs.confidence}</span>
+      <h3 class="sub">3連複 4点</h3><div class="picks">${combos(hs.trio ?? [], '=')}</div>
+      ${(hs.trifecta ?? []).length ? `<h3 class="sub">3連単 4点</h3><div class="picks">${combos(hs.trifecta, '-')}</div>` : ''}
+      <p class="note">1点100円。3連複4点＋3連単4点で800円です。回収率は100%未満です。</p></div>`
+      : p2 ? `<div class="panel aipick"><b>AI予想　${esc(p2.name)}</b><span class="badge">自信度 ${p2.confidence}</span>
+      <div class="picks">${combos(p2.picks ?? [], '=')}</div>
       <p class="note">1点100円・2点で200円。回収率は100%未満です。</p></div>` : ''
-    const cta = R.has_member_picks && !p2
-      ? `<a class="cta" href="/member">このレースのAI予想（3連複2点）を見る（会員・月500円）</a>` : ''
+    const cta = R.has_member_picks && !aiPick
+      ? `<a class="cta" href="/member">このレースのAI予想（3連複4点＋3連単4点）を見る（会員・月500円）</a>` : ''
     const E = R.entries ?? []
     // 1着確率は会員限定（2026-09-23）。合言葉があれば会員ぶんから戻して出走表に出す。
     const probOf = new Map((paid?.probs ?? []).map((p) => [p.lane, p]))
@@ -1147,7 +1160,7 @@
           <tr><th>無料予想（単勝1点）</th><td>○</td><td>○</td></tr>
           <tr><th>各レースの1着確率</th><td>―</td><td>○</td></tr>
           <tr><th>展開予想（全レース）</th><td>―</td><td>○</td></tr>
-          <tr><th>AI予想（3連複2点）</th><td>―</td><td>○</td></tr>
+          <tr><th>AI予想（3連複4点＋3連単4点）</th><td>―</td><td>○</td></tr>
         </tbody></table></div>
       <p><a href="/member">会員について見る →</a></p>
       <h2>先に知っておいていただきたいこと</h2>
