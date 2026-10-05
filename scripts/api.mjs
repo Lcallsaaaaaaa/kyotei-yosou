@@ -380,7 +380,10 @@ function featuresOf(db, date, ctx) {
       if (x.ex_course != null && x.ex_course < x.lane) alerts.maezuke.push({ ...base, lane: x.lane, name: nameOf(id, x.lane), course: x.ex_course })
       if (x.tilt != null) {
         const pv = x.racer_id ? prevTilt.get(x.racer_id, id, ymd(addDays(date, -8)) + '-', id.slice(9, 11))?.tilt : null
-        if (x.tilt >= 1.0 || (pv != null && x.tilt > pv))
+        // ★+2.0以上に絞った（2026-10-06）。実測で「+1.0以上 **または** 前走から上げた」は
+        //   1着率が1.05倍＝飾りだった。薄めていたのは『前走から上げた』側（46,326件・0.98倍）。
+        //   +2.0以上なら前半2.17倍・後半2.24倍（3,003件・約2本/日）で揃う。
+        if (x.tilt >= 2.0)
           alerts.tilt.push({ ...base, lane: x.lane, name: nameOf(id, x.lane), tilt: x.tilt, previous_tilt: pv ?? null })
       }
     }
@@ -403,7 +406,7 @@ function featuresOf(db, date, ctx) {
     gachigachi: { rule: 'AIの本命の1着確率が70%以上', races: gachi.filter(open).concat(gachi.filter((r) => !open(r))) },
     ana: { rule: 'AIの本命の1着確率が40%未満（荒れそう）', races: ana.filter(open).concat(ana.filter((r) => !open(r))) },
     alerts: { ...alerts, rules: {
-      maezuke: '展示の進入で、枠より内のコースに入った艇', tilt: 'チルト+1.0度以上、または同じ節の前走からチルトを上げた艇',
+      maezuke: '展示の進入で、枠より内のコースに入った艇', tilt: 'チルト+2.0度以上の艇',
       makuri: '3〜6号艇の展示タイムが1位で、1号艇より0.05秒以上速い', start: '展示STで外の艇が内の艇より0.05秒以上速い（内が凹み）' } },
     note: 'アラートは直前情報（締切の約20分前から）が入ったレースだけ。ガチガチ/穴はオッズを使わないAIの確率',
   }
