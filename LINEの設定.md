@@ -9,9 +9,12 @@
 **「今日の無料予想」ボタンに、次の1行をそのまま入れてください。**
 
 ```
-https://kyotei-site.pages.dev/?k=3U7v10Ba7rCtT7bQVBMFbg
+https://kyotei-site.pages.dev/?k=SriO9mMfstcRuPexiWlbYS
 ```
 
+> ⚠ **この鍵は毎月変わります。**月初に `node scripts/free-key.mjs` で出し直して貼り替えてください。
+> **月初の7日間は先月の鍵も通る**ので、数日遅れても止まりません。
+>
 > ⚠ `?k=` の部分が鍵です。**これが付いていないと無料予想は開きません。**
 > 友だちだけが見られるメニューに置くので、ここが「友だちかどうか」の代わりになります。
 > SNSや記事に貼らないでください（貼ると誰でも開けます）。
@@ -20,7 +23,7 @@ https://kyotei-site.pages.dev/?k=3U7v10Ba7rCtT7bQVBMFbg
 
 | ボタン | URL |
 |---|---|
-| **今日の無料予想** | `https://kyotei-site.pages.dev/?k=3U7v10Ba7rCtT7bQVBMFbg` |
+| **今日の無料予想** | `https://kyotei-site.pages.dev/?k=SriO9mMfstcRuPexiWlbYS` |
 | 有料会員はこちら | `https://kyotei-site.pages.dev/member` |
 | 昨日までの実績 | `https://kyotei-site.pages.dev/results` |
 | 出走表・データ | `https://kyotei-site.pages.dev/` |
@@ -36,7 +39,7 @@ https://kyotei-site.pages.dev/?k=3U7v10Ba7rCtT7bQVBMFbg
 きょうの無料予想（単勝1点）を公開しました。
 
 ▼ きょうの予想
-https://kyotei-site.pages.dev/?k=3U7v10Ba7rCtT7bQVBMFbg
+https://kyotei-site.pages.dev/?k=SriO9mMfstcRuPexiWlbYS
 
 1着確率80%以上の本命だけを選んでいます。
 外れた日も消さずに実績に残しています。
