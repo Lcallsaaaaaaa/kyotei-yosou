@@ -9,7 +9,7 @@
 **「今日の無料予想」ボタンに、次の1行をそのまま入れてください。**
 
 ```
-https://kyotei-site.pages.dev/?k=SriO9mMfstcRuPexiWlbYS
+https://boatrace-nagi.top/?k=SriO9mMfstcRuPexiWlbYS
 ```
 
 > ⚠ **この鍵は毎月変わります。**月初に `node scripts/free-key.mjs` で出し直して貼り替えてください。
@@ -23,10 +23,14 @@ https://kyotei-site.pages.dev/?k=SriO9mMfstcRuPexiWlbYS
 
 | ボタン | URL |
 |---|---|
-| **今日の無料予想** | `https://kyotei-site.pages.dev/?k=SriO9mMfstcRuPexiWlbYS` |
-| 有料会員はこちら | `https://kyotei-site.pages.dev/member` |
-| 昨日までの実績 | `https://kyotei-site.pages.dev/results` |
-| 出走表・データ | `https://kyotei-site.pages.dev/` |
+| **今日の無料予想** | `https://boatrace-nagi.top/?k=SriO9mMfstcRuPexiWlbYS` |
+| データ分析 | `https://boatrace-nagi.top/analysis` |
+| ニュース | `https://boatrace-nagi.top/news` |
+| 注意アラート | `https://boatrace-nagi.top/alerts` |
+| 有料会員登録 | `https://boatrace-nagi.top/member` |
+| 問い合わせ | **URLでなく「メッセージ送信」を勧めます**（LINEの中で完結するため） |
+
+実績は `https://boatrace-nagi.top/results`、出走表は `https://boatrace-nagi.top/` です。
 
 ---
 
@@ -39,7 +43,7 @@ https://kyotei-site.pages.dev/?k=SriO9mMfstcRuPexiWlbYS
 きょうの無料予想（単勝1点）を公開しました。
 
 ▼ きょうの予想
-https://kyotei-site.pages.dev/?k=SriO9mMfstcRuPexiWlbYS
+https://boatrace-nagi.top/?k=SriO9mMfstcRuPexiWlbYS
 
 1着確率80%以上の本命だけを選んでいます。
 外れた日も消さずに実績に残しています。
@@ -69,8 +73,8 @@ https://kyotei-site.pages.dev/?k=SriO9mMfstcRuPexiWlbYS
 ・回収率は100%未満です。買い続けると資金は減ります
 ・外れた日も消さずに実績に残しています
 
-利用規約 https://kyotei-site.pages.dev/terms
-プライバシーポリシー https://kyotei-site.pages.dev/privacy
+利用規約 https://boatrace-nagi.top/terms
+プライバシーポリシー https://boatrace-nagi.top/privacy
 ```
 
 ---

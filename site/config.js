@@ -14,7 +14,7 @@ window.NAGI = {
   //   公開してよい鍵だけ。service_role / secret は絶対にここへ入れない。
   supabaseUrl: 'https://fvhjuleiaycmavdorokp.supabase.co',
   supabaseAnonKey: 'sb_publishable_tDZtdMhMYU4oDBEXSIPIAg_lYyRRFHL',
-  noteUrl: '',          // 会員（月500円）を売る note のメンバーシップのURL（空なら案内ボタンを出さない）
+  noteUrl: 'https://note.com/fuku_gyo/membership',          // 会員（月500円）を売る note のメンバーシップのURL（空なら案内ボタンを出さない）
 
   // ---- LINE（無料の入口）----
   //   LCall の振り分けURL。叩くたびに複数の公式アカウントへ散らすので、
