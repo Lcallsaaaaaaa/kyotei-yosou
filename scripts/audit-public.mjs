@@ -47,7 +47,7 @@ const fail = (...a) => { ng++; if (ng <= 20) console.log('  ✗', ...a) }
 // ① 買い目が「誰でも見られる側」に無いこと
 //    ・results/ … 的中率の集計であって買い目ではないので対象外
 //    ・member/ … メール登録した人向け。無料枠の単勝1点が picks という名前で入っているので
-//                ここでは見ず、下の④で「月300円の中身が紛れていないか」を別に確かめる
+//                ここでは見ず、下の④で「月500円の中身が紛れていないか」を別に確かめる
 //                （2026-09-26：ここを分けずに誤検知していた）
 const openPub = pub.filter(([k]) => !k.startsWith('member/'))
 const memberDocs = pub.filter(([k]) => k.startsWith('member/'))
@@ -61,11 +61,11 @@ for (const [k, b] of openPub) {
     if (s.includes(bad)) fail(k, 'に予想の数字', bad)
 }
 
-// ④ メール登録した人ぶんに、月300円の中身が紛れていないこと
+// ④ メール登録した人ぶんに、月500円の中身が紛れていないこと
 for (const [k, b] of memberDocs) {
   const s = JSON.stringify(b)
   for (const bad of ['"plan2"', '"haishin"', '"trio":[', '"trifecta":[', '"exacta":[', '"prediction":'])
-    if (s.includes(bad)) fail(k, 'に月300円の中身', bad)
+    if (s.includes(bad)) fail(k, 'に月500円の中身', bad)
 }
 
 // ② 展開予想は無料枠のレースだけ

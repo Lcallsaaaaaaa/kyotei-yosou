@@ -96,7 +96,7 @@
   const paidDoc = async (key) => openBox(await doc(key))
 
   // ---------- メール登録（無料） ----------
-  // 月300円の会員（合言葉）とは別のしくみ。Supabase の認証だけを使う。
+  // 月500円の会員（合言葉）とは別のしくみ。Supabase の認証だけを使う。
   // 無料枠（単勝1点）は member/ 置き場にあり、Pages Functions が本人確認してから返す。
   // 画面だけで隠すのではなく、**置き場の手前で止めている**ので、URLを直接叩いても取れない。
   // ---------- LINEのリッチメニューから渡される合言葉 ----------
@@ -186,20 +186,20 @@
     const stale = st && date && st.period !== date.slice(0, 7)
     return `<div class="panel lock"><b>${esc(what)}は会員の方だけご覧いただけます</b>
       <p>${stale ? `お手持ちの合言葉は${jaPeriod(st.period)}のものです。${jaPeriod(date.slice(0, 7))}の合言葉を入れてください。`
-        : '月額300円の会員になると、全レースの展開予想とAI予想（3連複2点プラン）がご覧いただけます。'}</p>
-      <p><a class="cta" href="/member">合言葉を入れる</a>${C.noteUrl ? ` <a class="cta ghost" href="${esc(C.noteUrl)}" target="_blank" rel="noopener">会員になる（月300円）</a>` : ''}</p></div>`
+        : '月額500円の会員になると、全レースの展開予想とAI予想（3連複2点プラン）がご覧いただけます。'}</p>
+      <p><a class="cta" href="/member">合言葉を入れる</a>${C.noteUrl ? ` <a class="cta ghost" href="${esc(C.noteUrl)}" target="_blank" rel="noopener">会員になる（月500円）</a>` : ''}</p></div>`
   }
   async function memberPage() {
     setNav('member')
     const st = memberState()
     const now = jstToday().slice(0, 7)
-    meta('会員（月額300円）', '月額300円の会員になると、全レースの展開予想とAI予想（3連複2点プラン）がご覧いただけます。')
+    meta('会員（月額500円）', '月額500円の会員になると、全レースの展開予想とAI予想（3連複2点プラン）がご覧いただけます。')
     const ok = st && st.period === now
     view(`<h1>会員</h1>
       <div class="panel">${ok ? `<p><b>${jaPeriod(st.period)}の会員として開いています。</b></p>
           <p class="sub">合言葉は毎月変わります。翌月ぶんは月末にnoteのメンバーシップでお知らせします。</p>
           <p><button type="button" class="cta ghost" id="mem-clear">この端末から合言葉を消す</button></p>`
-        : `<p>noteのメンバーシップ（月額300円）に入ると、毎月の合言葉が届きます。</p>
+        : `<p>noteのメンバーシップ（月額500円）に入ると、毎月の合言葉が届きます。</p>
           <p>その合言葉をここに入れると、この端末では<b>その月のあいだ入れ直さずに</b>、全レースの展開予想とAI予想（3連複2点プラン）が開きます。</p>
           ${st ? `<p class="note">いま入っているのは${jaPeriod(st.period)}の合言葉です。今月（${jaPeriod(now)}）ぶんを入れ直してください。</p>` : ''}`}</div>
       ${ok ? '' : `<div class="panel" style="margin-top:12px">
@@ -209,7 +209,7 @@
           <button type="button" id="mem-eye" class="eye" aria-pressed="false" aria-label="合言葉を表示する">表示</button></div>
         <p><button type="button" class="cta" id="mem-go">開く</button></p>
         <p id="mem-msg" class="sub"></p>
-        ${C.noteUrl ? `<p><a href="${esc(C.noteUrl)}" target="_blank" rel="noopener">まだ会員でない方（noteで月額300円）→</a></p>` : ''}</div>`}
+        ${C.noteUrl ? `<p><a href="${esc(C.noteUrl)}" target="_blank" rel="noopener">まだ会員でない方（noteで月額500円）→</a></p>` : ''}</div>`}
       <p class="note">合言葉はこの端末の中だけに保存され、外には送られません。お連れの方やSNSへ教えないでください。</p>`)
     document.getElementById('mem-clear')?.addEventListener('click', async () => { await clearKey(); cache.clear(); route() })
     const go = document.getElementById('mem-go'), input = document.getElementById('mem-in'), msg = document.getElementById('mem-msg')
@@ -422,7 +422,7 @@
   const entryCards = () => `<h2>このサイトでできること</h2>
     <div class="entry-cards">${ENTRY.map(([href, t, d]) =>
       `<a href="${href}"><b>${t}</b><span>${d}</span></a>`).join('')}</div>`
-  // ★会員（月300円）で何が見られるかを、トップでそのまま見せる（2026-09-27）。
+  // ★会員（月500円）で何が見られるかを、トップでそのまま見せる（2026-09-27）。
   //   前は「展開予想とAI予想がご覧いただけます」の一文だけで、
   //   何本あるのか・どんな形で出るのかが分からなかった。
   //   ⚠ 出せるのは「印」と「数」だけ。買い目・1着確率・展開予想の中身は
@@ -442,10 +442,10 @@
       ['1着確率', num(nAll, 'レース'), '6艇ぶんの確率を出走表の中に'],
       ['注目レース', hasFeat ? '<span class="mv-n">ガチガチ・穴</span>' : '<span class="mv-n sub">—</span>', '本命の1着確率で選んだ特集'],
     ]
-    // ⚠ CSVの書き出しは「月300円で」と決めたが**まだ作っていない**。
+    // ⚠ CSVの書き出しは「月500円で」と決めたが**まだ作っていない**。
     //   出来ていないものをここに並べない（2026-09-27）。作ったら items に足す。
     return `<section class="member-value" id="member-value">
-      <h2>会員（月額300円）で見られるもの <span class="sub">きょうのぶん</span></h2>
+      <h2>会員（月額500円）で見られるもの <span class="sub">きょうのぶん</span></h2>
       <div class="mv-grid">${items.map(([t, n, d]) =>
         `<div class="mv-item"><b>${t}</b>${n}<span class="mv-d">${d}</span></div>`).join('')}</div>
       <div class="mv-sample" aria-label="会員ページの見本。数字は伏せてあります">
@@ -647,7 +647,7 @@
         <small>${pct(x.probability)}</small>${x.hit == null ? '' : x.hit ? `<b class="hit">的中 ${yen(x.payout)}</b>` : '<b class="miss">不的中</b>'}</span>`).join('')}</div>
       <p class="note">1点100円・2点で200円。回収率は100%未満です。</p></div>` : ''
     const cta = R.has_member_picks && !p2
-      ? `<a class="cta" href="/member">このレースのAI予想（3連複2点）を見る（会員・月300円）</a>` : ''
+      ? `<a class="cta" href="/member">このレースのAI予想（3連複2点）を見る（会員・月500円）</a>` : ''
     const E = R.entries ?? []
     // 1着確率は会員限定（2026-09-23）。合言葉があれば会員ぶんから戻して出走表に出す。
     const probOf = new Map((paid?.probs ?? []).map((p) => [p.lane, p]))
@@ -1142,7 +1142,7 @@
         <p>${lineBtn('LINEで友だち追加する')}</p>
       </div>
       <h2>無料と会員のちがい</h2>
-      <div class="tw"><table class="t"><thead><tr><th>　</th><th>無料（LINE）</th><th>会員（月300円）</th></tr></thead>
+      <div class="tw"><table class="t"><thead><tr><th>　</th><th>無料（LINE）</th><th>会員（月500円）</th></tr></thead>
         <tbody>
           <tr><th>無料予想（単勝1点）</th><td>○</td><td>○</td></tr>
           <tr><th>各レースの1着確率</th><td>―</td><td>○</td></tr>

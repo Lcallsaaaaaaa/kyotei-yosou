@@ -66,7 +66,7 @@ function publicRace(j) {
   const free = picks?.free_win ? { lane: picks.free_win.lane, racer: picks.free_win.racer,
     probability: picks.free_win.probability, hit: picks.free_win.hit, payout: picks.free_win.payout } : null
   // ★予想は一切、誰でも見られる側に出さない（2026-09-26）。
-  //   ・1着確率と展開予想とAI予想 … 月300円の会員（合言葉で開く暗号文）
+  //   ・1着確率と展開予想とAI予想 … 月500円の会員（合言葉で開く暗号文）
   //   ・無料枠の単勝1点 … メール登録した人（member/ 置き場・Pages Functions が本人確認）
   //   誰でも見られるのは、公式データ（出走表・結果・オッズ・直前情報）だけ。
   const entries = (race.entries ?? []).map(({ win_probability, top2_probability, ...e }) => e)
@@ -76,7 +76,7 @@ function publicRace(j) {
       member_only: !!tenkai, has_member_picks: !!(picks?.plan2 || picks?.haishin),
       has_member_probs: (race.entries ?? []).some((e) => e.win_probability != null) } }
 }
-// 会員（月300円）に見せるぶん。これは必ず seal() で閉じてから送る。
+// 会員（月500円）に見せるぶん。これは必ず seal() で閉じてから送る。
 function memberRace(j) {
   if (!j?.race) return null
   const { prediction, picks, tenkai, entries } = j.race
@@ -94,7 +94,7 @@ function assertNoPaid(key, obj) {
   for (const bad of ['"prediction":', '"picks":', '"trio":[', '"trifecta":[', '"exacta":['])
     if (s.includes(bad)) throw new Error(`${key} に有料の項目 ${bad} が入っている。送らずに止める`)
   // 予想の数字は、誰でも見られる側には一切出さない（2026-09-26に例外を全部なくした）。
-  // 無料枠の単勝1点は member/（メール登録した人向け）へ、それ以外は paid/（月300円）へ回す。
+  // 無料枠の単勝1点は member/（メール登録した人向け）へ、それ以外は paid/（月500円）へ回す。
   for (const bad of ['"win_probability"', '"probability"', '"tenkai":{', '"honmei"'])
     if (s.includes(bad)) throw new Error(`${key} に予想の数字 ${bad} が入っている。送らずに止める`)
 }
@@ -229,7 +229,7 @@ async function putPaid(docs, date) {
 }
 
 // ---------- メール登録した人ぶん（member/）----------
-// 月300円の会員ぶん（paid/）は暗号文だが、こちらは**暗号にしない**。
+// 月500円の会員ぶん（paid/）は暗号文だが、こちらは**暗号にしない**。
 // 代わりに Pages Functions が Supabase のログインを確かめてから返す（site/functions/data/[[path]].js）。
 // 置き場を直接叩かれても、鍵が無ければ Functions が拒否する。
 async function putMember(docs) {
@@ -237,9 +237,9 @@ async function putMember(docs) {
     if (!body) continue
     if (!key.startsWith('member/')) throw new Error(`${key} は member/ で始めること`)
     const s = JSON.stringify(body)
-    // ここに入れてよいのは無料枠（単勝1点）だけ。月300円の中身が紛れ込んだら止める。
+    // ここに入れてよいのは無料枠（単勝1点）だけ。月500円の中身が紛れ込んだら止める。
     for (const bad of ['"plan2"', '"haishin"', '"trio":[', '"trifecta":[', '"exacta":[', '"prediction":'])
-      if (s.includes(bad)) throw new Error(`${key} に月300円の中身 ${bad} が入っている。送らずに止める`)
+      if (s.includes(bad)) throw new Error(`${key} に月500円の中身 ${bad} が入っている。送らずに止める`)
   }
   await putRaw(docs)
 }
@@ -281,7 +281,7 @@ async function syncDay(date, withRacers) {
     const d = publicRace(j)
     r.free_pick = !!d?.race?.has_free_pick     // 印だけ。中身はメール登録した人向け（member/）
     r.member_only = !!d?.race?.member_only     // 一覧に「会員」の印を出すため
-    delete r.favorite                          // 本命と1着確率は月300円の会員限定
+    delete r.favorite                          // 本命と1着確率は月500円の会員限定
     docs.push([`race/${r.race_id}`, d])
     const m = memberRace(j)
     if (m) paid.push([`paid/race/${r.race_id}`, m])
