@@ -254,3 +254,13 @@
    付けないと両方出てしまう（2026-09-26に実際そうなった）。 */
 body.signed-in .only-out { display: none !important; }
 body:not(.signed-in) .only-in { display: none !important; }
+
+/* 枠線だけのボタン（.cta.ghost）の文字色を取り戻す（2026-10-05）。
+   style.css の `:root:not([data-theme="light"]) .cta { color:#fff }` は
+   詳細度 (0,3,0) で、core.css を後に読んでも .cta.ghost (0,2,0) が負ける。
+   しかもその指定はダークモードの中に入っていないので**明るい画面にも効き**、
+   白地に白文字で「展開予想の一覧を見る」が読めなくなっていた。
+   ここで同じ強さ以上にして上書きする。消すと再発する。 */
+:root .cta.ghost,
+:root:not([data-theme="light"]) .cta.ghost,
+:root[data-theme="dark"] .cta.ghost { color: var(--accent); background: none; }

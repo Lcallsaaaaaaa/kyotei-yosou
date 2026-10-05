@@ -24,7 +24,7 @@ window.NAGI = {
 
   // ---- 検索とアクセス解析 ----
   siteName: 'ボートレース研究所',
-  siteUrl: '',          // 例 'https://nagi-kyotei.com'（末尾のスラッシュなし）
+  siteUrl: 'https://boatrace-nagi.top',          // 例 'https://nagi-kyotei.com'（末尾のスラッシュなし）
                         //   ここを入れると canonical・OGP・sitemap.xml が正しいURLになる。
                         //   空のままだと sitemap が作れず、検索に出るまでが遅くなる。
   gaId: '',             // GA4 の測定ID 例 'G-XXXXXXXXXX'（空ならアクセス解析を読み込まない）
