@@ -45,8 +45,18 @@ for (const [id, bs0] of P) {
   races.push({ id, ymd: id.slice(0, 8), jcd: Number(id.slice(9, 11)), grade: grade.get(id) ?? '一般', bs })
 }
 races.sort((a, b) => a.id.localeCompare(b.id))
-const CUT = races[Math.floor(races.length / 2)].ymd
-console.log(`${races.length.toLocaleString()}レース　前半 〜${CUT} ／ 後半 ${CUT}〜`)
+// ★--thirds … 3分割（2026-10-05）
+//   2分割だと「①で条件を探し、②で全部の条件を見る」ことになり、②を見て選ぶ
+//   余地が残る。①探す → ②絞る → ③一度だけ試す、まで分ければ塞げる。
+//   風向き（kaze-roi.mjs）でも同じ直しをした。
+const THIRDS = process.argv.includes('--thirds')
+const n3 = Math.floor(races.length / 3)
+const CUT = THIRDS ? races[n3].ymd : races[Math.floor(races.length / 2)].ymd
+const CUT2 = races[n3 * 2].ymd
+const part = (r) => (r.ymd < CUT ? 0 : (!THIRDS || r.ymd < CUT2) ? 1 : 2)
+const d = (s) => `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`
+if (THIRDS) console.log(`${races.length.toLocaleString()}レース　①探す 〜${d(CUT)} ／ ②絞る ${d(CUT)}〜 ／ ③試す ${d(CUT2)}〜`)
+else console.log(`${races.length.toLocaleString()}レース　前半 〜${d(CUT)} ／ 後半 ${d(CUT)}〜`)
 console.log('')
 
 const VEN = { 1: '桐生', 2: '戸田', 3: '江戸川', 4: '平和島', 5: '多摩川', 6: '浜名湖', 7: '蒲郡', 8: '常滑',
@@ -57,7 +67,7 @@ const VEN = { 1: '桐生', 2: '戸田', 3: '江戸川', 4: '平和島', 5: '多�
 function evalRule(rule, which) {
   let n = 0, hit = 0, ret = 0
   for (const r of races) {
-    if (which === 0 ? r.ymd >= CUT : r.ymd < CUT) continue
+    if (part(r) !== which) continue
     for (const b of rule.pick(r)) {
       n++
       if ((rank.get(r.id).get(b.lane) ?? 9) <= 2) { hit++; ret += pay.get(r.id + '|' + b.lane) ?? 0 }
@@ -139,20 +149,41 @@ console.log('')
 const both = rules.map((r) => ({ label: r.label, a: evalRule(r, 0), b: evalRule(r, 1) }))
   .filter((r) => r.a.n >= MIN_N && r.b.n >= MIN_N)
 const over = both.filter((r) => r.a.roi >= 100 && r.b.roi >= 100)
-const ceilA = Math.max(...both.map((r) => r.a.roi))
-const ceilB = Math.max(...both.map((r) => r.b.roi))
 
 console.log('【結論】')
-console.log(`  試した条件　　　　　　　${both.length}通り（前半・後半とも${MIN_N}点以上）`)
-console.log(`  前半の天井　　　　　　　${ceilA.toFixed(1)}%`)
-console.log(`  後半の天井　　　　　　　${ceilB.toFixed(1)}%`)
-console.log(`  前半も後半も100%超え　　${over.length}通り`)
-if (over.length) {
-  console.log('')
-  console.log('  前半     後半      点数   条件')
-  for (const r of over.sort((x, y) => y.b.roi - x.b.roi).slice(0, 15))
-    console.log(`  ${r.a.roi.toFixed(1).padStart(6)}% → ${r.b.roi.toFixed(1).padStart(6)}%  ${String(r.b.n.toLocaleString()).padStart(7)}  ${r.label}`)
+console.log(`  試した条件　　　　　　　　　${both.length}通り（①②とも${MIN_N}点以上）`)
+console.log(`  ①の天井　　　　　　　　　　${Math.max(...both.map((r) => r.a.roi)).toFixed(1)}%`)
+console.log(`  ②の天井　　　　　　　　　　${Math.max(...both.map((r) => r.b.roi)).toFixed(1)}%`)
+console.log(`  ①②とも100%超え　　　　　　${over.length}通り`)
+
+if (!THIRDS) {
+  if (over.length) {
+    console.log('')
+    console.log('  前半     後半      点数   条件')
+    for (const r of over.sort((x, y) => y.b.roi - x.b.roi).slice(0, 15))
+      console.log(`  ${r.a.roi.toFixed(1).padStart(6)}% → ${r.b.roi.toFixed(1).padStart(6)}%  ${String(r.b.n.toLocaleString()).padStart(7)}  ${r.label}`)
+  } else {
+    console.log('')
+    console.log('  → オッズを使わない選び方では、複勝で100%を超えるものは見つかりませんでした。')
+  }
 } else {
+  // ★③は一度も見ていない期間。ここで初めて当てる。
   console.log('')
-  console.log('  → オッズを使わない選び方では、複勝で100%を超えるものは見つかりませんでした。')
+  console.log('================ ③で一度だけ試す ================')
+  if (!over.length) {
+    console.log('  ①②の両方で100%を超えた条件が無いので、③に当てるものがありません。')
+    console.log('  → オッズを使わない選び方では、複勝で100%を超えるものは見つかりませんでした。')
+  } else {
+    console.log(`  ①②を生き残った ${over.length}通りを、③に当てます。`)
+    console.log('  ①        ②        ③        点数   条件')
+    let alive = 0
+    for (const r of over.sort((x, y) => y.b.roi - x.b.roi)) {
+      const c = evalRule(rules.find((x) => x.label === r.label), 2)
+      if (c.n < MIN_N) continue
+      if (c.roi >= 100) alive++
+      console.log(`  ${r.a.roi.toFixed(1).padStart(6)}% → ${r.b.roi.toFixed(1).padStart(6)}% → ${c.roi.toFixed(1).padStart(6)}%  ${String(c.n.toLocaleString()).padStart(7)}  ${r.label}`)
+    }
+    console.log('')
+    console.log(`  → ③でも100%を超えたもの： ${alive}通り`)
+  }
 }
