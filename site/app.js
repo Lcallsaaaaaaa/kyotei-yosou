@@ -1039,6 +1039,56 @@
   }
 
   // ---------- データ分析 ----------
+  /** 展示のアラート。LINEのリッチメニューから来る人の着地点でもある。
+   *  ★効き目は2026-10-05に実測した（228,685レース・前半と後半に分けて確認）。
+   *    当たっているものと飾りを、そのまま書く。隠すと信用を落とす。 */
+  async function alertsPage() {
+    setNav('alerts')
+    const date = jstToday()
+    meta('展示のアラート｜まくり・前づけ・チルト・スタート',
+      '展示タイム・進入・チルト・展示STから、荒れそうなレースを機械的に拾っています。効き目を228,685レースで実測した結果もそのまま載せています。',
+      { canonical: '/alerts' })
+    const F = await doc(`features/${date}`)
+    const A = F?.alerts
+    const rlink = (x) => `<a href="/race/${x.race_id}">${esc(x.venue)}${x.race_no}R</a> <span class="sub">${esc(x.deadline ?? '')}</span>`
+    const list = (arr, fn, n = 12) => {
+      const open = (arr ?? []).filter((x) => !x.closed)
+      const src = open.length ? open : (arr ?? [])
+      if (!src.length) return '<li><span class="sub">きょうは該当がありません</span></li>'
+      return src.slice(0, n).map(fn).join('') + (open.length ? '' : '<li><span class="sub">（締切前のレースはもうありません。きょうのぶんを出しています）</span></li>')
+    }
+    // 実測。数字はここでしか出さない（scripts/alert-test.mjs の出力）
+    const EV = {
+      makuri: ['効きます', 'まくり・まくり差しで決まる率が <b>1.27倍</b>（25.8%→32.8%）。その艇が1着になる率も <b>1.30倍</b>。前半・後半とも同じ。'],
+      tilt: ['1着に効きます', '3着以内に入る率はほぼ変わりません（1.1倍）。ただし <b>1着になる率は1.5倍</b>。当たるか飛ぶかの艇になります。'],
+      maezuke: ['狙い目ではありません', '強く見えるのは「内のコースに入ったから」で、<b>同じ進入コースの艇と比べると差は消えます</b>（1.05倍）。進入が変わったという事実の通知として見てください。'],
+      start: ['ほとんど差がありません', '凹んだ内の艇が4着以下になる率は <b>1.11倍</b>。1日の3分の2で鳴るので、絞り込みには使えません。'],
+    }
+    const panel = (key, title, rule, arr, fn) => `<div class="panel">
+      <b>${title}</b> <span class="sub">${esc(rule ?? '')}</span>
+      <p class="note"><b>${EV[key][0]}</b>　${EV[key][1]}</p>
+      <ol class="rank">${list(arr, fn)}</ol></div>`
+    view(`<h1>展示のアラート <span class="sub">${md(date)}(${wd(date)})</span></h1>
+      <p>締切の約20分前に出る<b>直前情報</b>（展示タイム・進入・チルト・展示ST）から、機械的に拾っています。
+        公式が発表している事実だけを使っているので、<b>どなたでもご覧いただけます</b>。</p>
+      <p class="note">効き目は228,685レース（2022-08〜2026-10）で実測しました。期間を前半と後半に分け、
+        両方で同じ結果になったものだけ「効きます」と書いています。
+        外枠は元から3着内率が低いので、<b>枠と進入コースを揃えて</b>比べています。</p>
+      ${!A ? '<p class="empty">きょうの直前情報がまだありません。朝のレースが始まるとここに出ます。</p>' : `
+      <div class="grid two">
+        ${panel('makuri', 'まくりアラート', A.rules?.makuri, A.makuri, (x) =>
+          `<li><span>${rlink(x)}</span><span class="num">${waku(x.lane)} 展示${dash(x.exhibition_time)}（1号艇より${dash(x.diff)}秒速い）</span></li>`)}
+        ${panel('tilt', 'チルト跳アラート', A.rules?.tilt, A.tilt, (x) =>
+          `<li><span>${rlink(x)}</span><span class="num">${waku(x.lane)} ${esc(x.name ?? '')} ${x.previous_tilt != null ? dash(x.previous_tilt, 1) + '→' : ''}${dash(x.tilt, 1)}</span></li>`)}
+        ${panel('maezuke', '前づけアラート', A.rules?.maezuke, A.maezuke, (x) =>
+          `<li><span>${rlink(x)}</span><span class="num">${waku(x.lane)} ${esc(x.name ?? '')} → ${x.course}コース</span></li>`)}
+        ${panel('start', 'スタートアラート', A.rules?.start, A.start, (x) =>
+          `<li><span>${rlink(x)}</span><span class="num">${waku(x.outer_lane)}が${waku(x.inner_lane)}より${dash(x.diff)}秒速い</span></li>`)}
+      </div>`}
+      <p class="note">アラートは買い目ではありません。<b>舟券の購入は20歳からです。</b></p>
+      <p><a href="/">きょうの出走表へ →</a>　<a href="/analysis/average">コース別のデータを見る →</a></p>`)
+  }
+
   async function analysis(kind) {
     setNav('analysis')
     const KINDS = [['average', 'コース別平均'], ['ranking', 'コース別ランキング'], ['demoku', '出目分析'], ['yusho', '優勝戦']]
@@ -1309,6 +1359,7 @@
       if (p[0] === 'meeting') return await meeting(Number(p[1]), p[2])
       if (p[0] === 'analysis') return await analysis(p[1])
       if (p[0] === 'member') return await memberPage()
+      if (p[0] === 'alerts') return await alertsPage()
       if (p[0] === 'line') return await linePage()
       // 旧 /signup（メール登録）で来た人は LINE へ送る。リンクを死なせない。
       if (p[0] === 'signup') return navTo('/line', true)

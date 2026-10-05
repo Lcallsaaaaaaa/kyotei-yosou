@@ -18,6 +18,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createHash } from 'node:crypto'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SITE = join(ROOT, 'site')
@@ -60,6 +61,22 @@ const md = (d) => { const [, m, dd] = String(d).split('-'); return `${Number(m)}
 const pct = (v) => (v == null ? '―' : Number(v).toFixed(1) + '%')
 const num = (v, d = 2) => (v == null ? '―' : Number(v).toFixed(d))
 
+// ---------- 置き換えたJS/CSSを確実に読ませる ----------
+// ★2026-10-05。_headers が app.js / style.css / core.css を 5分ためる設定なので、
+//   公開しても**ブラウザは古いものを握ったまま**。この日2回つまずいた。
+//     ・枠線ボタンの白文字を直したのに直らない（core.css が古い）
+//     ・/alerts を足したのに「ページが見つかりません」（app.js が古い・90,567→93,807バイト）
+//   もっと悪いのは、**新しいHTMLと古いJSが混ざる**こと。中身の形が変わっていたら壊れる。
+//   ファイルの中身から短い印を作ってURLに付ければ、変わった時だけ必ず読み直される。
+const ASSETS = ['app.js', 'style.css', 'core.css', 'config.js']
+const VER = (() => {
+  const h = createHash('sha1')
+  for (const f of ASSETS) { try { h.update(readFileSync(join(SITE, f))) } catch { /* 無ければ飛ばす */ } }
+  return h.digest('hex').slice(0, 8)
+})()
+const stampAssets = (html) => ASSETS.reduce((s, f) =>
+  s.replaceAll(`"/${f}"`, `"/${f}?v=${VER}"`), html)
+
 // ---------- HTMLの外枠を差し替える ----------
 function page({ path, title, desc, body, ld, article }) {
   const full = title.startsWith(SITE_NAME) ? title : `${title}｜${SITE_NAME}`
@@ -78,7 +95,7 @@ function page({ path, title, desc, body, ld, article }) {
   h = h.replace('</head>', head + '\n</head>')
   // 本文。JavaScriptが動いたらここは描き直される
   h = h.replace(/<main id="app" tabindex="-1">[\s\S]*?<\/main>/, `<main id="app" tabindex="-1">${body}</main>`)
-  return h
+  return stampAssets(h)
 }
 
 let written = 0
@@ -233,6 +250,7 @@ const listPages = [
   ['/schedule', 'ボートレース開催予定', '全国24場の開催予定と、SG・G1・G2・G3のグレードレースの日程・出場予定選手をまとめています。'],
   ['/results', '的中実績', '過去30日の的中率と回収率です。締切前に出した予想だけを、外れた日も含めて集計しています。'],
   ['/member', '会員（月額500円）', '月額500円の会員になると、全レースの展開予想とAI予想（3連複4点＋3連単4点）、各レースの1着確率がご覧いただけます。'],
+  ['/alerts', '展示のアラート｜まくり・前づけ・チルト・スタート', '展示タイム・進入・チルト・展示STから、荒れそうなレースを機械的に拾っています。効き目を228,685レースで実測した結果もそのまま載せています。'],
   ['/line', 'LINEで無料予想を受け取る', 'ボートレース研究所の無料予想（単勝1点・1着確率80%以上の本命だけ）を、LINEで毎朝10時にお届けします。費用はかかりません。'],
   ['/analysis/average', 'コース別平均｜競艇データ分析', '競艇のコース別平均。全国24場の直近1年の実測データから集計しています。'],
   ['/analysis/ranking', 'コース別ランキング｜競艇データ分析', '競艇のコース別ランキング。全国24場の直近1年の実測データから集計しています。'],
