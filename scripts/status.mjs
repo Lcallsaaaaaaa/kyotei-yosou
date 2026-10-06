@@ -21,6 +21,8 @@ import { DatabaseSync } from 'node:sqlite'
 import { spawn } from 'node:child_process'
 import { cardPage } from './racecard.mjs'
 import { apiRoute } from './api.mjs'
+import { createHmac } from 'node:crypto'
+import { phraseOf } from './seal.mjs'
 import { readdirSync, statSync, readFileSync, existsSync } from 'node:fs'
 import { MARGIN, MAX_BUY, FUKU, FUKU90, CHECK_FROM, CHECK_UNTIL, minOddsFor } from './strategy.mjs'
 
@@ -621,6 +623,106 @@ const dayBanner = (date, path) => date === today() ? '' :
   `URLに ?date=${esc(date)} が付いたままです。` +
   `<a href="${esc(path)}">きょうの分を開く</a></div>`
 
+// ---------- 今月の合言葉と鍵（2026-10-06） ----------
+// ★毎月変わるものを、コマンドを打たずに見られるようにする。
+//   有料会員の合言葉（paid-key.mjs）とLINE無料予想の鍵（free-key.mjs）は
+//   どちらも月替わりなのに、ターミナルを開かないと確認できなかった。
+//   毎月やることなので、手元の画面から1タップで出るようにする。
+function kagiPage() {
+  const p2 = (n) => String(n).padStart(2, '0')
+  const jst = new Date(Date.now() + 9 * 3600e3)
+  const cur = `${jst.getUTCFullYear()}-${p2(jst.getUTCMonth() + 1)}`
+  const nxt = (() => { const [y, m] = cur.split('-').map(Number); return m === 12 ? `${y + 1}-01` : `${y}-${p2(m + 1)}` })()
+  const ja = (x) => { const [y, m] = x.split('-').map(Number); return `${y}年${m}月` }
+  const day = jst.getUTCDate()
+
+  let paid = null, free = null, site = 'https://boatrace-nagi.top', err = []
+  try {
+    paid = { cur: phraseOf(cur), nxt: phraseOf(nxt) }
+  } catch (e) { err.push('合言葉: ' + e.message) }
+  try {
+    // free-key.mjs は走らせると画面に出力するので、計算だけここで同じことをする。
+    // ⚠ 片方を変えたらもう片方も直すこと（窓口 site/functions/data/[[path]].js も同じ式）。
+    const mk = Buffer.from(JSON.parse(readFileSync(join(ROOT, 'data', 'free-secret.json'), 'utf8')).master, 'hex')
+    const k = (period) => createHmac('sha256', mk).update('freekey:' + period).digest('base64url').slice(0, 22)
+    free = { cur: k(cur), nxt: k(nxt) }
+  } catch (e) { err.push('LINEの鍵: ' + e.message) }
+  try {
+    const win = {}
+    new Function('window', readFileSync(join(ROOT, 'site', 'config.js'), 'utf8'))(win)
+    if (win.NAGI?.siteUrl) site = String(win.NAGI.siteUrl).replace(/\/+$/, '')
+  } catch { /* 既定のまま */ }
+
+  const box = (title, body, note) => `<div class="sum"><div class="sumh">${title}</div>${body}${note ? `<p class="cf" style="margin:8px 0 0">${note}</p>` : ''}</div>`
+  const copy = (v) => `<div class="kagi"><code>${esc(v)}</code><button type="button" data-v="${esc(v)}">コピー</button></div>`
+
+  const head = `<!doctype html><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>今月の合言葉</title>
+<style>
+:root{--bg:#eef1f4;--card:#fff;--ink:#101820;--sub:#5f7080;--line:#d3dbe2;--hit:#0d6b3f;--warn:#b01026}
+@media(prefers-color-scheme:dark){:root{--bg:#0c1116;--card:#151d25;--ink:#e6edf3;--sub:#8fa1b0;--line:#25313c}}
+*{box-sizing:border-box}
+body{margin:0;padding:12px 10px 60px;background:var(--bg);color:var(--ink);
+font-family:system-ui,-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;line-height:1.6}
+h1{font-size:17px;margin:4px 0 2px}
+.sub{font-size:12.5px;color:var(--sub);margin-bottom:10px}
+.tabs{display:flex;gap:6px;margin:10px 0 14px;flex-wrap:wrap}
+.tabs a{padding:6px 13px;border-radius:999px;border:1px solid var(--line);
+background:var(--card);color:var(--ink);text-decoration:none;font-size:13px}
+.sum{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin-bottom:12px}
+.sumh{font-size:13px;font-weight:700;margin-bottom:9px}
+.cf{font-size:11.5px;color:var(--sub)}
+.kagi{display:flex;gap:8px;align-items:center;margin:6px 0;flex-wrap:wrap}
+.kagi code{flex:1 1 240px;background:rgba(0,0,0,.05);padding:7px 9px;border-radius:7px;
+font-size:13px;word-break:break-all;font-family:ui-monospace,monospace}
+@media(prefers-color-scheme:dark){.kagi code{background:rgba(255,255,255,.07)}}
+.kagi button{padding:6px 12px;border-radius:7px;border:1px solid var(--line);
+background:var(--card);color:var(--ink);font-size:12.5px;cursor:pointer}
+.lbl{font-size:12px;color:var(--sub);margin-top:9px}
+.warn{border-left:3px solid var(--warn)}
+pre{background:rgba(0,0,0,.05);padding:10px;border-radius:8px;font-size:12.5px;
+white-space:pre-wrap;word-break:break-word;margin:6px 0}
+@media(prefers-color-scheme:dark){pre{background:rgba(255,255,255,.07)}}
+</style>`
+
+  const pushText = free ? `おはようございます。
+きょうの無料予想（単勝1点）を公開しました。
+
+▼ きょうの予想
+${site}/?k=${free.cur}
+
+1着確率80%以上の本命だけを選んでいます。
+外れた日も消さずに実績に残しています。
+
+※ 舟券の購入は20歳からです。回収率は100%未満です。` : ''
+
+  return head + kessonBar() +
+    `<h1>今月の合言葉と鍵</h1><div class="sub">${ja(cur)}　（毎月1日に変わります）</div>
+    <div class="tabs"><a href="/">当日の判定</a><a href="/asa">朝の見張り表</a><a href="/haishin">配信用</a></div>` +
+    (err.length ? `<div class="sum warn"><div class="sumh">出せなかったもの</div><p class="cf">${err.map(esc).join('<br>')}</p></div>` : '') +
+    (paid ? box(`有料会員の合言葉（note メンバーシップに貼る）`,
+      `<div class="lbl">${ja(cur)}（今月）</div>${copy(paid.cur)}
+       <div class="lbl">${ja(nxt)}（来月・月末に貼る）</div>${copy(paid.nxt)}`,
+      'note のメンバーシップ投稿でお知らせします。文面は <code>node scripts/paid-key.mjs --note</code>') : '') +
+    (free ? box('LINEリッチメニューの「今日の無料予想」',
+      `<div class="lbl">${ja(cur)}（今月・いま貼るもの）</div>${copy(site + '/?k=' + free.cur)}
+       <div class="lbl">${ja(nxt)}（来月・月初に貼り替える）</div>${copy(site + '/?k=' + free.nxt)}`,
+      `月初の7日間は先月の鍵も通ります。${day <= 7 ? '<b>いまは猶予期間です。まだ貼り替えていなければ今月のものに。</b>' : ''}`) : '') +
+    (free ? box('毎朝10時の配信文（そのまま貼れます）',
+      `<pre>${esc(pushText)}</pre>${copy(site + '/?k=' + free.cur)}`) : '') +
+    box('鍵が要らないボタン',
+      `<div class="lbl">データ分析</div>${copy(site + '/analysis')}
+       <div class="lbl">ニュース</div>${copy(site + '/news')}
+       <div class="lbl">注意アラート</div>${copy(site + '/alerts')}
+       <div class="lbl">有料会員登録</div>${copy(site + '/member')}`) +
+    `<script>
+document.addEventListener('click',(e)=>{const b=e.target.closest('button[data-v]');if(!b)return;
+ navigator.clipboard?.writeText(b.dataset.v).then(()=>{const t=b.textContent;b.textContent='コピーしました';setTimeout(()=>{b.textContent=t},1400)})
+ .catch(()=>{b.textContent='コピーできません'})})
+</script>`
+}
+
 function asaPage(date, margin) {
   const d = asaData(date)
   const M = String(margin)
@@ -678,7 +780,7 @@ border-radius:8px;padding:11px 13px;font-size:13px;margin-bottom:12px}
       `<span>締切 ${esc(r.deadline || "-")}</span></div>${rows}</div>`
   }).join("")
   return head + kessonBar() + dayBanner(date, '/asa') + `<h1>朝の見張り表</h1><div class="sub">${date}　${d.races.length}レース　見張る艇 ${n}本</div>` +
-    `<div class="tabs">${tabs}<a href="/">当日の判定へ</a><a href="/haishin">配信用</a></div>` + b2html +
+    `<div class="tabs">${tabs}<a href="/">当日の判定へ</a><a href="/haishin">配信用</a><a href="/kagi">今月の合言葉</a></div>` + b2html +
     `<div class="note"><b>⚠ 2026-08-31：この判定は実測で成立していません</b><br>
 単勝は総取り式で、<b>払戻は締切後に決まります</b>。締切前の表示は目安でしかありません。<br>
 締切0分前の実測（6,486件）で、表示が高いほど確定で崩れます：<br>
@@ -1294,6 +1396,11 @@ createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' })
     return res.end(haishinPage(date, Math.min(4, Math.max(1, Number(u.searchParams.get('n') || 2)))))
+  }
+  if (u.pathname === '/kagi') {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' })
+    return res.end(kagiPage())
   }
   if (u.pathname === '/asa') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8',
