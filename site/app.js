@@ -77,6 +77,13 @@
   async function loadKey() {
     if (memKey) return memKey
     try { const v = await idbDo('readonly', (s) => s.get('member')); if (v?.key) { memKey = v; return v } } catch { /* 無ければ null */ }
+    // ★鍵が無いのに「会員です」の印だけ残っている状態を直す（2026-10-09）
+    //   鍵は IndexedDB、会員かどうかの印は localStorage と、置き場が別。
+    //   IndexedDB だけ消えると（プライベートモード・端末の掃除・iOSの自動削除）、
+    //   **会員ページは「◯月の会員として開いています」と出すのに、中身は何も開かない**
+    //   という食い違いが起きる。本人には原因が分からず「壊れている」としか見えない。
+    //   鍵が無いと分かった時点で印も消して、合言葉の入力欄に戻す。
+    try { if (localStorage.getItem(MEM)) localStorage.removeItem(MEM) } catch { /* 消せなくても害は無い */ }
     return null
   }
   async function clearKey() {
@@ -186,21 +193,145 @@
     const stale = st && date && st.period !== date.slice(0, 7)
     return `<div class="panel lock"><b>${esc(what)}は会員の方だけご覧いただけます</b>
       <p>${stale ? `お手持ちの合言葉は${jaPeriod(st.period)}のものです。${jaPeriod(date.slice(0, 7))}の合言葉を入れてください。`
-        : '月額500円の会員になると、全レースの展開予想とAI予想（3連複4点＋3連単4点）がご覧いただけます。'}</p>
+        : '月額500円の会員になると、全レースの展開予想（展開の図つき）と、レースごとに選べるAI予想の型（本命・堅実・中穴・大穴）がご覧いただけます。'}</p>
       <p><a class="cta" href="/member">合言葉を入れる</a>${C.noteUrl ? ` <a class="cta ghost" href="${esc(C.noteUrl)}" target="_blank" rel="noopener">会員になる（月500円）</a>` : ''}</p></div>`
   }
+  // ---------- 展開予想の図（2026-10-06）----------
+  /** スタートから1マークまでを上から見た図。文章だけだと伝わらないので絵にする。
+   *
+   *  ★これは予想の絵であって、実際のレースの再現ではない。
+   *    使っているのは「展示の進入コース」「展示ST」「1着確率」「決まり手の確率」だけ。
+   *    ⚠ 「こう動く」と断定しない書き方にすること。当たるかどうかは別の話で、
+   *       当たり外れは /seiseki に出している。
+   *
+   *  ★材料が無いときの振る舞い
+   *    展示がまだなら進入は枠なり（1号艇=1コース）、STは平均STで代用する。
+   *    どちらで描いたかは必ず画面に書く（見た人が「展示を見た図」と誤解しないように）。
+   */
+  function tenkaiFigure(t, entries) {
+    const E = (entries ?? []).filter((e) => e.lane)
+    if (E.length !== 6) return ''
+    // 進入コース。展示があればそれ、無ければ枠なり
+    const hasEx = E.some((e) => e.before?.start_course)
+    const courseOf = (e) => e.before?.start_course ?? e.lane
+    // 同じコースが重なったら枠順で解く（展示データの欠けに備える）
+    const byCourse = E.slice().sort((a, b) => (courseOf(a) - courseOf(b)) || (a.lane - b.lane))
+    const course = new Map(byCourse.map((e, i) => [e.lane, i + 1]))
+
+    // ST。展示STがあればそれ、無ければ平均ST
+    const hasSt = E.some((e) => e.before?.start_st != null)
+    const stOf = (e) => e.before?.start_st ?? e.avg_st ?? 0.17
+    const sts = E.map(stOf).filter((v) => v != null)
+    const stMin = Math.min(...sts)
+
+    // 予想の上位3艇
+    const top = [t.honmei, t.taiko, t.third].filter(Boolean)
+    const rankOf = new Map(top.map((x, i) => [x.lane, i + 1]))
+    const moveOf = new Map(top.map((x) => [x.lane, x.likely_move]))
+
+    // ---- 図の寸法。viewBox で縮むので mobile でも読める ----
+    const W = 680, H = 272, X0 = 64, LANE = 34, Y0 = 34
+    const y = (c) => Y0 + (c - 1) * LANE
+    // STが遅いほど左から出る。0.01秒＝6px（0.06秒差で1艇身ぶんの見た目）
+    const lag = (e) => Math.min(60, Math.max(0, (stOf(e) - stMin) * 600))
+
+    // ★終わりの位置は「1マークへ向かう列」にする（2026-10-06）
+    //   同じ x に縦並びで止めると**ゴール線にしか見えず、誰が先に回るのか伝わらない**
+    //   （最初そう描いて作り直した）。1着予想をマークのいちばん近くに置き、
+    //   2着・3着をその後ろへ斜めに並べると、順番が絵のまま読める。
+    const MX = 536, MY = 54            // 1マークの位置
+    const QUEUE = [[478, 74], [432, 108], [388, 142]]   // 1着・2着・3着の着地点
+    const endOf = (e) => {
+      const r = rankOf.get(e.lane)
+      if (r && QUEUE[r - 1]) return QUEUE[r - 1]
+      // 上位3艇に入らなかった艇は、自分のコースのまま後ろに置く
+      return [300 - (course.get(e.lane) - 1) * 6, y(course.get(e.lane)) + 24]
+    }
+
+    const boat = (e) => {
+      const c = course.get(e.lane), r = rankOf.get(e.lane)
+      const [ex, ey] = endOf(e)
+      return `<g class="tk-b tk-l${e.lane}${r ? ' tk-top' : ''}" style="--x0:${X0 - lag(e)}px;--y0:${y(c)}px;--x1:${ex}px;--y1:${ey}px;--d:${(c - 1) * 0.04}s">
+        <rect class="tk-hull" x="-13" y="-9" width="26" height="18" rx="5"></rect>
+        <text class="tk-no" x="0" y="5" text-anchor="middle">${e.lane}</text>
+      </g>`
+    }
+
+    const label = (x, i) => {
+      const [ex, ey] = QUEUE[i] ?? [0, 0]
+      return `<g class="tk-lab tk-lab${i + 1}">
+        <text x="${ex + 20}" y="${ey - 2}" class="tk-rank">${i + 1}着予想</text>
+        <text x="${ex + 20}" y="${ey + 13}" class="tk-move">${esc(x.likely_move ?? '')}</text></g>`
+    }
+
+    const lanes = [1, 2, 3, 4, 5, 6].map((c) =>
+      `<line class="tk-lane" x1="0" y1="${y(c)}" x2="${MX - 40}" y2="${y(c)}"></line>`).join('')
+    // 1マーク（ターンマーク）と、そこへ回り込む線
+    const mark = `<g class="tk-mark">
+      <path class="tk-turn" d="M ${MX - 180} ${MY + 130} Q ${MX - 10} ${MY + 120} ${MX} ${MY + 16}"></path>
+      <circle cx="${MX}" cy="${MY}" r="8"></circle>
+      <text x="${MX}" y="${MY - 14}" text-anchor="middle" class="tk-mark-t">1マーク</text></g>`
+
+    const topMove = top[0]?.likely_move ?? ''
+    const id = 'tk' + Math.random().toString(36).slice(2, 8)
+    return `<div class="panel tkwrap">
+      <div class="tk-head"><b>展開のイメージ</b>
+        <button type="button" class="tk-replay" data-tk="${id}">もう一度見る</button></div>
+      <svg id="${id}" class="tk" viewBox="0 0 ${W} ${H}" role="img"
+        aria-label="スタートから1マークまでの展開予想。本線は${esc(String(top[0]?.lane ?? ''))}号艇の${esc(topMove)}">
+        <line class="tk-start" x1="${X0}" y1="${Y0 - 16}" x2="${X0}" y2="${y(6) + 16}"></line>
+        <text class="tk-start-t" x="${X0}" y="${Y0 - 22}" text-anchor="middle">スタート</text>
+        ${lanes}${mark}
+        ${byCourse.map(boat).join('')}
+        ${top.map(label).join('')}
+      </svg>
+      <p class="tk-n">内側が1コースです。${hasEx ? '進入は<b>展示の進入</b>' : '進入は<b>枠なり</b>（展示がまだ）'}、
+        ${hasSt ? 'スタート位置の前後は<b>展示ST</b>' : 'スタート位置の前後は<b>平均ST</b>'}で描いています。</p>
+      <p class="note">これは<b>予想を絵にしたもの</b>で、レースの再現ではありません。
+        実際にこう動くとは限りません。当たり外れは<a href="/seiseki">実績</a>に出しています。</p>
+    </div>`
+  }
+
+  /** トップに出すアラートの要約。中身は LINE 友だち限定なので、件数と入口だけ出す。
+   *  （2026-10-06・本人判断「基本的にはリッチメニューLINE登録が必須」） */
+  function alertTeaser(al) {
+    if (!al) return ''
+    const NAME = { makuri: 'まくり', tilt: 'チルト跳', maezuke: '前づけ', start: 'スタート' }
+    const c = al.count ?? null, o = al.open ?? null
+    const total = c ? Object.values(c).reduce((s, n) => s + n, 0) : 0
+    // 古い形（中身がそのまま入っている）でも落ちないようにしておく
+    const legacy = Array.isArray(al.makuri)
+    const n = (k) => legacy ? (al[k] ?? []).length : (c?.[k] ?? 0)
+    const nOpen = (k) => legacy ? (al[k] ?? []).filter((x) => !x.closed).length : (o?.[k] ?? 0)
+    const sum = legacy ? Object.keys(NAME).reduce((s, k) => s + n(k), 0) : total
+    return `<h2>アラート <span class="sub">当日の直前情報から</span></h2>
+      <div class="panel lock">
+        <b>${sum ? `きょうは ${sum}件 鳴っています` : 'きょうはまだ鳴っていません'}</b>
+        <ul class="inline">${Object.entries(NAME).map(([k, ja]) =>
+          `<li>${ja} <b>${n(k)}</b>${nOpen(k) ? `<span class="sub">（締切前${nOpen(k)}）</span>` : ''}</li>`).join('')}</ul>
+        <p>どのレースで鳴っているかは<b>LINEの友だち限定</b>です（無料）。</p>
+        <p>${C.lineAddUrl ? `<a class="cta" href="${esc(C.lineAddUrl)}" target="_blank" rel="noopener">LINEで友だち追加（無料）</a>` : ''}
+          <a class="cta ghost" href="/alerts">アラートの効き目を見る</a></p>
+      </div>`
+  }
+
   async function memberPage() {
     setNav('member')
+    // ★印（localStorage）ではなく、**実際に鍵があるか**で画面を決める（2026-10-09）
+    //   loadKey() は鍵が無ければ印のほうも消すので、ここを先に呼ぶと食い違いが直る。
+    //   前は印だけを見ていたので、鍵が消えた端末で「会員として開いています」と出しつつ
+    //   中身は何も開かない、という状態になっていた。
+    await loadKey()
     const st = memberState()
     const now = jstToday().slice(0, 7)
-    meta('会員（月額500円）', '月額500円の会員になると、全レースの展開予想とAI予想（3連複4点＋3連単4点）がご覧いただけます。')
+    meta('会員（月額500円）', '月額500円の会員になると、全レースの展開予想（展開の図つき）と、レースごとに選べるAI予想の型（本命・堅実・中穴・大穴）がご覧いただけます。')
     const ok = st && st.period === now
     view(`<h1>会員</h1>
       <div class="panel">${ok ? `<p><b>${jaPeriod(st.period)}の会員として開いています。</b></p>
           <p class="sub">合言葉は毎月変わります。翌月ぶんは月末にnoteのメンバーシップでお知らせします。</p>
           <p><button type="button" class="cta ghost" id="mem-clear">この端末から合言葉を消す</button></p>`
         : `<p>noteのメンバーシップ（月額500円）に入ると、毎月の合言葉が届きます。</p>
-          <p>その合言葉をここに入れると、この端末では<b>その月のあいだ入れ直さずに</b>、全レースの展開予想とAI予想（3連複4点＋3連単4点）が開きます。</p>
+          <p>その合言葉をここに入れると、この端末では<b>その月のあいだ入れ直さずに</b>、全レースの展開予想（展開の図つき）と、AI予想の型（本命・堅実・中穴・大穴）が開きます。</p>
           ${st ? `<p class="note">いま入っているのは${jaPeriod(st.period)}の合言葉です。今月（${jaPeriod(now)}）ぶんを入れ直してください。</p>` : ''}`}</div>
       ${ok ? '' : `<div class="panel" style="margin-top:12px">
         <label for="mem-in"><b>合言葉</b></label>
@@ -531,7 +662,7 @@
     const rlink = (x) => `<a href="/race/${x.race_id}">${esc(x.venue)}${x.race_no}R</a> <span class="sub">${esc(x.deadline ?? '')}</span>`
     const pick = (list, fn, n = 8) => list.filter((x) => !x.closed).slice(0, n).map(fn).join('') || '<li><span class="sub">該当なし（締切前のレース）</span></li>'
     // 注目レース（ガチガチ・穴）は「AIの本命の1着確率」そのものなので会員限定（2026-09-23）。
-    // アラートは展示タイムやチルトから作っていて1着予想ではないので、無料のまま。
+    // アラートの中身も LINE 友だち限定にした（2026-10-06）。トップでは件数だけ出して /alerts へ送る。
     const fp = F?.member_only ? await paidDoc(`paid/features/${date}`) : null
     const G = fp?.gachigachi ?? F?.gachigachi, A = fp?.ana ?? F?.ana
     const feat = F ? `${G && A ? `<div class="grid two" style="margin-top:12px">
@@ -540,17 +671,7 @@
         <div class="panel"><b>穴レース</b> <span class="sub">${esc(A.rule)}</span><ol class="rank">${pick(A.races, (x) =>
           `<li><span>${rlink(x)}</span><span class="num">本命${waku(x.favorite.lane)} ${pct(x.favorite.win_probability)}</span></li>`)}</ol></div>
       </div>` : F.member_only ? lockPanel('注目レース（ガチガチ・穴）', date) : ''}
-      <h2>アラート <span class="sub">当日の直前情報から</span></h2>
-      <div class="grid two">
-        <div class="panel"><b>まくりアラート</b> <span class="sub">${esc(F.alerts.rules.makuri)}</span><ol class="rank">${pick(F.alerts.makuri, (x) =>
-          `<li><span>${rlink(x)}</span><span class="num">${waku(x.lane)} 展示${dash(x.exhibition_time)}（1号艇より${dash(x.diff)}秒速い）</span></li>`)}</ol></div>
-        <div class="panel"><b>前づけアラート</b> <span class="sub">${esc(F.alerts.rules.maezuke)}</span><ol class="rank">${pick(F.alerts.maezuke, (x) =>
-          `<li><span>${rlink(x)}</span><span class="num">${waku(x.lane)} ${esc(x.name ?? '')} → ${x.course}コース</span></li>`)}</ol></div>
-        <div class="panel"><b>チルト跳アラート</b> <span class="sub">${esc(F.alerts.rules.tilt)}</span><ol class="rank">${pick(F.alerts.tilt, (x) =>
-          `<li><span>${rlink(x)}</span><span class="num">${waku(x.lane)} ${esc(x.name ?? '')} ${x.previous_tilt != null ? dash(x.previous_tilt, 1) + '→' : ''}${dash(x.tilt, 1)}</span></li>`)}</ol></div>
-        <div class="panel"><b>スタートアラート</b> <span class="sub">${esc(F.alerts.rules.start)}</span><ol class="rank">${pick(F.alerts.start, (x) =>
-          `<li><span>${rlink(x)}</span><span class="num">${waku(x.outer_lane)}が${waku(x.inner_lane)}より${dash(x.diff)}秒速い</span></li>`)}</ol></div>
-      </div>` : ''
+      ${alertTeaser(F.alerts)}` : ''
     const NI = await doc('news/index')
     const topNews = (NI?.articles ?? []).slice(0, 3)
     const newsBlock = topNews.length ? `<h2>ニュース <a class="sub" href="/news">もっと見る →</a></h2><div class="news-list">${topNews.map(newsItem).join('')}</div>` : ''
@@ -588,14 +709,63 @@
     // ログインしていなければ URL を直接叩いても取れない。
     const mem = free.length ? await memberDoc(`member/free/${date}`) : null
     const picks = mem?.picks ?? []
-    const freeBox = !free.length ? '' : `<h2>きょうの無料予想 <span class="sub">単勝1点・1着確率80%以上の本命だけ・${free.length}本</span></h2>
-      ${picks.length ? `<div class="free-list">${picks.map((f) => `
+    // ★未登録の人にも毎日1レースだけ見せる（2026-10-10 本人指示）
+    //   「サイトを見るだけなら毎日1レース／それ以外を見るならLINE登録／そのあと有料会員」。
+    //   以前は未登録に**1本も出していなかった**ので、入口が閉じていた。
+    //   どのレースかは裏側（sync-public の pickTaster）が日ごとに1回だけ決めて固定している。
+    //   ⚠ 画面側で「1本だけ出す」をやってはいけない。置き場に全部あると
+    //     /data/member/free/<日付>.json を直接叩かれて素通しになる。
+    const tst = picks.length ? null : await doc(`taster/${date}`)
+    const one = tst?.pick ?? null
+    // ★見出しは「1号艇1着」と具体的に出す（2026-10-09 本人指示）。
+    //   探す人は「1号艇 1着」で探すので、そのままの言葉で出したほうが届く。
+    //   ⚠ ただし**言い切らない**。無料枠は「1着確率80%以上」で選んでおり、
+    //     実測785本のうち **5本（0.6%）は1号艇以外**だった（2・3・4号艇）。
+    //     その日に1号艇でない本命が混ざったら見出しが嘘になるので、
+    //     **きょうの分が全部1号艇のときだけ**この見出しにする。
+    //   ⚠ 見出しは**いま画面に出しているものだけ**で決める。
+    //     登録済みなら「その日の全部」、未登録なら「試し読みの1本」。
+    //     出していないレースの艇番を根拠にすると、見出しが嘘になる。
+    const shown = picks.length ? picks : (one ? [one] : [])
+    const allLane1 = shown.length > 0 && shown.every((f) => f.lane === 1)
+    const freeTitle = allLane1
+      ? `きょうの<b>1号艇1着</b>無料予想`
+      : 'きょうの無料予想'
+    const freeCard = (f) => `
           <a class="free-card${f.closed ? ' done' : ''}" href="/race/${f.race_id}">
             <span class="free-head">${esc(f.venue ?? VENUES[f.jcd])}${f.race_no}R <span class="sub">${esc(f.deadline ?? '')}</span></span>
             <span class="free-pick">${waku(f.lane)} <b>${esc(f.racer ?? '')}</b></span>
             <span class="free-p">1着確率 ${pct(f.win_probability)}</span>
-            ${f.hit == null ? '' : f.hit ? `<span class="hit">的中 ${yen(f.payout)}</span>` : '<span class="miss">不的中</span>'}</a>`).join('')}</div>
-        <p class="note">買い目は100円換算です。当たらなかったぶんも消さずに<a href="/results">実績</a>に残しています。</p>`
+            ${f.hit == null ? '' : f.hit ? `<span class="hit">的中 ${yen(f.payout)}</span>` : '<span class="miss">不的中</span>'}</a>`
+    // 試し読みの下に、残りの枠を**中身を伏せて**並べる（2026-10-11 本人指示）。
+    // 「ほかにもある」が目に見えるほうが登録につながる。
+    //
+    // ⚠ **ぼかしの下に本物を置かないこと。** CSSのぼかしは見た目だけで、
+    //   ソースを見れば読めてしまう＝LINE登録の意味が無くなる。
+    //   ここに入れるのは**作り物の文字**だけ。本物の買い目はそもそも手元に無い
+    //   （member/free は置き場の手前で止めているので、未登録の画面には届いていない）。
+    //   出しているのは場・レース番号・締切だけで、これは元から出走表で公開している情報。
+    const lockedCard = (f) => `
+          <div class="free-card locked" aria-hidden="true">
+            <span class="free-head">${esc(f.venue ?? VENUES[f.jcd])}${f.race_no}R <span class="sub">${esc(f.deadline ?? '')}</span></span>
+            <span class="free-blur">
+              <span class="free-pick"><span class="waku w1">?</span> <b>＊＊＊＊</b></span>
+              <span class="free-p">1着確率 ＊＊.＊%</span></span>
+            <span class="free-lock">LINE登録で見られます</span></div>`
+    const freeNote = '<p class="note">買い目は100円換算です。当たらなかったぶんも消さずに<a href="/results">実績</a>に残しています。</p>'
+    const rest = Math.max(0, free.length - 1)
+    // 試し読み以外の無料枠から3つ。**まだ締切前のものを先に**出す
+    // （終わったレースの枠を見せても「これから買える」感がなく、登録の動機にならない）。
+    // ⚠ 締切が未設定のものは後ろへ。空文字のまま比べると**先頭に来てしまう**
+    const dl = (r) => r.deadline || '99:99'
+    const lockedList = free.filter((r) => r.race_id !== one?.race_id)
+      .sort((a, b) => (a.closed ? 1 : 0) - (b.closed ? 1 : 0) || dl(a).localeCompare(dl(b))).slice(0, 3)
+    const freeBox = !free.length ? '' : `<h2>${freeTitle} <span class="sub">${
+      picks.length ? `単勝1点・1着確率80%以上の本命だけ・${free.length}本`
+        : one ? `単勝1点・きょうの試し読み1レース（全${free.length}本）` : `単勝1点・${free.length}本`}</span></h2>
+      ${picks.length ? `<div class="free-list">${picks.map(freeCard).join('')}</div>${freeNote}`
+        : one ? `<div class="free-list">${freeCard(one)}${lockedList.map(lockedCard).join('')}</div>${freeNote}
+          ${restPanel(rest)}`
         : signupPanel(`きょうの無料予想${free.length}本`)}`
 
     const entries = isToday ? entryCards() : ''
@@ -603,7 +773,7 @@
 
     meta(isToday ? `${SITE}｜競艇の出走表・展開予想・データ` : `${md(date)}(${wd(date)})の出走表 全国${byV.size}場${j.races.length}レース`,
       isToday
-        ? `全国24場の出走表・直前情報・オッズ・結果と、AIの1着確率。場ごとの攻略、選手データ、データ分析も公開。きょうは${byV.size}場${j.races.length}レース、無料予想${free.length}本。`
+        ? `全国24場の出走表・直前情報・オッズ・結果と、AIの1着確率。きょうの1号艇1着の無料予想（単勝1点）を${free.length}本公開。場ごとの攻略、選手データ、データ分析も。${byV.size}場${j.races.length}レース。`
         : `${date.replaceAll('-', '/')}の全国${byV.size}場${j.races.length}レースの出走表。締切時刻・選手の成績・モーター・直前情報と、AIの1着確率をまとめています。`,
       { canonical: date === jstToday() ? '/' : `/d/${date}` })
     // 並びは「顔 → 次の締切 → 無料予想 → 会員で見られるもの → レース一覧 → 特集 → 場状況 → ニュース → 入口」
@@ -637,10 +807,15 @@
         competitor: (R.entries ?? []).map((e) => ({ '@type': 'Person', name: e.name })) } })
     const state = R.cancelled ? '<span class="badge gray">中止・順延</span>' : R.result ? '<span class="badge gray">確定</span>' : R.closed ? '<span class="badge gray">締切</span>' : ''
     // 無料予想（単勝1点）はメール登録した人だけ。中身は member/ 側にある。
-    const fp = R.has_free_pick ? (await memberDoc(`member/free/${R.date}`))?.picks?.find((x) => x.race_id === id) : null
+    const mfp = R.has_free_pick ? (await memberDoc(`member/free/${R.date}`))?.picks?.find((x) => x.race_id === id) : null
+    // ★このレースが「きょうの試し読み」なら、登録なしでも中身を見せる（2026-10-10）。
+    //   taster/<日付> は誰でも読める置き場で、入っているのは**その1本だけ**。
+    //   race.taster の印も裏側（sync-public）が付けているので、画面で選んでいるのではない。
+    const fp = mfp ?? (R.taster ? (await doc(`taster/${R.date}`))?.pick ?? null : null)
     const free = !R.has_free_pick ? ''
-      : fp ? `<div class="panel freepick"><b>無料予想</b>　単勝 ${waku(fp.lane)} ${esc(fp.racer ?? '')}（1着確率 ${pct(fp.win_probability)}）
-        ${fp.hit == null ? '' : fp.hit ? `<span class="hit">的中 ${yen(fp.payout)}</span>` : '<span class="miss">不的中</span>'}</div>`
+      : fp ? `<div class="panel freepick"><b>${fp.lane === 1 ? '1号艇1着の無料予想' : '無料予想'}</b>　単勝 ${waku(fp.lane)} ${esc(fp.racer ?? '')}（1着確率 ${pct(fp.win_probability)}）
+        ${fp.hit == null ? '' : fp.hit ? `<span class="hit">的中 ${yen(fp.payout)}</span>` : '<span class="miss">不的中</span>'}
+        ${mfp ? '' : `<p class="sub">これは${R.date === jstToday() ? 'きょうの' : 'その日の'}<b>試し読み1レース</b>です。ほかのレースの無料予想は<a href="/line">LINE登録（無料）</a>で見られます。</p>`}</div>`
       : signupPanel('このレースの無料予想')
     // 会員ぶん（展開予想・AI予想）。合言葉が入っていなければ開かないので null になる
     const paid = (R.member_only || R.has_member_picks || R.has_member_probs) ? await paidDoc(`paid/race/${id}`) : null
@@ -652,15 +827,58 @@
     const hs = paid?.picks?.haishin
     const combos = (list, sep) => list.map((x) => `<span class="combo">${x.combo.split(sep).map((l) => waku(l)).join('')}
       <small>${pct(x.probability)}</small>${x.hit == null ? '' : x.hit ? `<b class="hit">的中 ${yen(x.payout)}</b>` : '<b class="miss">不的中</b>'}</span>`).join('')
-    const aiPick = hs ? `<div class="panel aipick"><b>AI予想</b><span class="badge">自信度 ${hs.confidence}</span>
+    // ★買い方の型（2026-10-06 本人判断）
+    //   「結局は参加してもらわなければ意味がない」。最高配当は入口・回収率は正直さ。
+    //   **両方を必ず並べて書く**。片方だけにしない。
+    //   出す型はレースの性格で変わる（自信度の高いレース＝本命の型／低いレース＝穴の型）。
+    //   大穴を自信度の高いレースに出すと回収が83.6%→57.3%に壊れるため（実測）。
+    const pt = paid?.picks?.patterns
+    const money = (v) => (v == null ? '―' : '約' + Math.round(v).toLocaleString() + '円')
+    const patternPanel = pt ? `<div class="panel aipick">
+      <b>AI予想</b><span class="badge">自信度 ${pt.confidence}</span>
+      ${''/* ⚠ 文言は展開予想と食い違わせないこと（2026-10-09）。
+            前は自信度で振り分けていたため、展開予想が「イン逃げ濃厚・本線は1号艇85.8%」
+            と書いているレースに「荒れやすい」＋本命を外す大穴を出していた。
+            いまは**本命の1着確率**で振り分けているので、同じ物差しで書く。 */}
+      <p class="note">${pt.zone === 'ana'
+        ? '本命が<b>絞りきれない</b>レースとみています。穴狙いの型を出しています。'
+        : '本命が<b>はっきりしている</b>レースとみています。本命狙いの型を出しています。'}</p>
+      ${pt.list.map((x) => {
+        const m = x.measured ?? {}
+        return `<div class="ptn">
+          <div class="ptn-h"><b>${esc(x.name)}</b> <span class="sub">${esc(x.kind)}・${x.yen}円</span></div>
+          <div class="picks">${combos(x.picks ?? [], x.kind.includes('連複') ? '=' : '-')}</div>
+          <ul class="ptn-m">
+            <li><span>当たる割合</span><b>${esc(m.hit ?? '―')}</b></li>
+            <li><span>平均配当</span><b>${money(m.avg_payout)}</b></li>
+            <li><span>最高配当</span><b>${money(m.best_payout)}</b></li>
+            <li class="roi"><span>回収率</span><b>${esc(m.roi ?? '―')}</b></li>
+          </ul>
+          ${m.man_per_races ? `<p class="ptn-n">万舟（1万円以上）が <b>${m.man_per_races}レースに1回</b></p>` : ''}
+        </div>`
+      }).join('')}
+      ${''/* ⚠ 言い回しに注意（2026-10-07）。
+            「学習に使っていない45,340レース」と書いていたが、これは不正確だった。
+            ずっと取り置いたレースがあるように読めるが、実際は**月ごとにモデルを
+            作り直し、その月のレースを学習に使っていないモデルで予想し直している**。
+            月をまたげばそのレースも学習データに入る（歩進検証）。
+            変えるときは memory の boatrace-bet-patterns を読むこと。 */}
+      <p class="note">1点100円。<b>当たる割合・平均配当・最高配当・回収率は、45,340レースでの実測</b>です。
+        1レースごとに、<b>そのレースをまだ学習していないモデル</b>（その時点までの情報だけで作ったもの）が出した予想を集計しています。
+        期間を前半と後半に分け、両方で確かめた値の幅を出しています。
+        最高配当は過去にいちばん大きかった1レースの額で、ふつうに出る額ではありません。
+        <b>回収率はどの型も100%未満です。買い続ければ減ります。</b></p>
+      <p class="note">舟券の購入は20歳からです。</p></div>` : ''
+    const aiPick = patternPanel
+      || (hs ? `<div class="panel aipick"><b>AI予想</b><span class="badge">自信度 ${hs.confidence}</span>
       <h3 class="sub">3連複 4点</h3><div class="picks">${combos(hs.trio ?? [], '=')}</div>
       ${(hs.trifecta ?? []).length ? `<h3 class="sub">3連単 4点</h3><div class="picks">${combos(hs.trifecta, '-')}</div>` : ''}
       <p class="note">1点100円。3連複4点＋3連単4点で800円です。回収率は100%未満です。</p></div>`
       : p2 ? `<div class="panel aipick"><b>AI予想　${esc(p2.name)}</b><span class="badge">自信度 ${p2.confidence}</span>
       <div class="picks">${combos(p2.picks ?? [], '=')}</div>
-      <p class="note">1点100円・2点で200円。回収率は100%未満です。</p></div>` : ''
+      <p class="note">1点100円・2点で200円。回収率は100%未満です。</p></div>` : '')
     const cta = R.has_member_picks && !aiPick
-      ? `<a class="cta" href="/member">このレースのAI予想（3連複4点＋3連単4点）を見る（会員・月500円）</a>` : ''
+      ? `<a class="cta" href="/member">このレースのAI予想と展開の図を見る（会員・月500円）</a>` : ''
     const E = R.entries ?? []
     // 1着確率は会員限定（2026-09-23）。合言葉があれば会員ぶんから戻して出走表に出す。
     const probOf = new Map((paid?.probs ?? []).map((p) => [p.lane, p]))
@@ -747,7 +965,8 @@
         const t = R.tenkai ?? paid?.tenkai
         if (!t) return R.member_only ? lockPanel('展開予想', R.date) : '<p class="empty">展開予想はまだありません。</p>'
         const km = t.kimarite.slice(0, 5)
-        return `<div class="panel"><div class="shape">${esc(t.shape)}</div>
+        return `${tenkaiFigure(t, R.entries ?? [])}
+          <div class="panel"><div class="shape">${esc(t.shape)}</div>
           <ol class="lines">${t.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ol></div>
           <h2>決まり手の確率</h2><div class="panel km">${km.map((k) => `<span>${esc(k.kimarite)}</span><i style="width:${Math.max(2, k.probability)}%"></i><span class="num">${pct(k.probability)}</span>`).join('')}</div>
           <p class="note">${esc(t.basis)}。オッズは使っていません。</p>`
@@ -847,6 +1066,23 @@
       <div class="tabs" role="tablist">${TABS.map(([k, n]) => `<button role="tab" aria-selected="${k === tab}" data-tab="${k}">${n}</button>`).join('')}</div>
       <div id="tab">${T[tab]()}</div>`)
     app.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => navTo(`/race/${id}/${b.dataset.tab}`)))
+    startTenkaiFigure()
+  }
+
+  /** 展開の図を動かす。画面に入ったときに1回だけ。
+   *  ⚠ .tk-go を付けるまで動かない作りなので、ここが呼ばれなくても図は読める。 */
+  function startTenkaiFigure() {
+    const svg = app.querySelector('svg.tk')
+    if (!svg) return
+    const play = () => { svg.classList.remove('tk-go'); void svg.getBoundingClientRect(); svg.classList.add('tk-go') }
+    app.querySelector('.tk-replay')?.addEventListener('click', play)
+    // 画面に入るまで待つ。タブを開いた瞬間に下で動き終わっていると見逃す
+    try {
+      const io = new IntersectionObserver((es) => {
+        for (const e of es) if (e.isIntersecting) { play(); io.disconnect() }
+      }, { threshold: 0.35 })
+      io.observe(svg)
+    } catch { play() }   // 古いブラウザはそのまま動かす
   }
 
   // ---------- 展開予想の一覧 ----------
@@ -906,11 +1142,32 @@
   }
   async function venue(jcd) {
     setNav('venues')
-    const [j, G] = await Promise.all([doc(`venue/${jcd}`), doc(`guide/${jcd}`)])
+    // ★きょうの開催もここに出す（2026-10-11）
+    //   「桐生 競艇」で来た人がいちばん先に知りたいのは**きょう何が走るか**なのに、
+    //   この画面にはその情報が1つも無かった（攻略データだけ）。
+    //   ⚠ 場ごとに毎日ニュース記事を作る案もあったが、13場×365日＝年4,700本の
+    //     似た記事になり、Googleの大量生成コンテンツの不正使用に当たる。
+    //     **URLを増やさず、この1枚を毎日新しくする**ほうが、評価も溜まる。
+    const today = jstToday()
+    const [j, G, RS] = await Promise.all([doc(`venue/${jcd}`), doc(`guide/${jcd}`), doc(`races/${today}`)])
     const V = j?.venue
     if (!V) return notFound('この場')
+    const mine = (RS?.races ?? []).filter((r) => r.jcd === jcd).sort((a, b) => a.race_no - b.race_no)
+    const head = mine[0]
+    const todayBox = !mine.length
+      ? `<h2>きょうの開催</h2><div class="panel"><p>きょう（${md(today)}）${esc(V.venue)}での開催はありません。
+          <a href="/schedule">開催予定</a>をご覧ください。</p></div>`
+      : `<h2>きょうの${esc(V.venue)} <span class="sub">${md(today)}・${esc(head.series ?? '')}${
+          head.grade ? `（${esc(head.grade)}）` : ''}${head.day_no ? `　${head.day_no}日目${head.series_days ? `/全${head.series_days}日` : ''}` : ''}</span></h2>
+        <div class="scroll"><table class="t"><thead><tr><th>R</th><th>締切</th><th class="l">状況</th><th class="l">結果</th><th>3連単</th></tr></thead><tbody>${
+          mine.map((r) => `<tr><td><a href="/race/${esc(r.race_id)}">${r.race_no}R</a></td><td>${esc(r.deadline ?? '―')}</td>
+            <td class="l">${r.cancelled ? '中止' : r.result ? '確定' : r.closed ? '締切' : '受付中'}</td>
+            <td class="l">${r.result?.order_all ? esc(r.result.order_all) + (r.result.kimarite ? `（${esc(r.result.kimarite)}）` : '') : '―'}</td>
+            <td>${r.result?.trifecta_payout ? yen(r.result.trifecta_payout) : '―'}</td></tr>`).join('')}</tbody></table></div>`
     meta(`ボートレース${V.venue}の攻略とデータ`,
-      `ボートレース${V.venue}の1コース1着率・コース別の決まり手・波や風での変わり方・当地で強い選手を、直近1年の実測からまとめた攻略ページです。`)
+      mine.length
+        ? `きょう（${md(today)}）のボートレース${V.venue}は${mine.length}レース${head?.series ? `「${head.series}」` : ''}。締切時刻と結果、1コース1着率・決まり手・波や風での変わり方・当地で強い選手を実測からまとめています。`
+        : `ボートレース${V.venue}の1コース1着率・コース別の決まり手・波や風での変わり方・当地で強い選手を、直近1年の実測からまとめた攻略ページです。`)
     const kmBars = (list, key = 'share') => list.map((k) => `<span>${esc(k.kimarite ?? k.label)}</span><i style="width:${Math.max(2, k[key])}%"></i><span class="num">${pct(k[key])}</span>`).join('')
     const cond = V.course1_by_condition ?? {}
     const condBlock = (title, list) => list?.length ? `<div><h3>${title}</h3><div class="panel km">${list.map((k) => `<span>${esc(k.label)}</span><i style="width:${Math.max(2, k.win_rate)}%"></i><span class="num">${pct(k.win_rate)}</span>`).join('')}</div></div>` : ''
@@ -918,6 +1175,7 @@
       <div class="stats" style="margin-top:12px"><div class="stat"><span>1コース1着率</span><b>${pct(V.by_course[0]?.win_rate)}</b></div>
         <div class="stat"><span>3連単の平均配当</span><b>${yen(V.trifecta.avg_payout)}</b></div>
         <div class="stat"><span>万舟率</span><b>${pct(V.trifecta.over_10000_rate)}</b></div></div>
+      ${todayBox}
       ${G?.points?.length ? `<h2>攻略の要点</h2><div class="panel guide"><ul>${G.points.map((p) => `<li>${esc(p)}</li>`).join('')}</ul><p class="note">${esc(G.points_note)}</p></div>` : ''}
       ${G?.manual ? `<h2>${esc(G.manual.title)}</h2><div class="panel article-body">${G.manual.html}</div>${G.manual.updated ? `<p class="note">更新：${esc(G.manual.updated)}</p>` : ''}` : ''}
       ${G?.related_news?.length ? `<h2>${esc(V.venue)}のニュース</h2><div class="news-list">${G.related_news.map((n) => `<a class="news-item" href="/news/${esc(n.slug)}"><span class="news-date">${n.date ? md(n.date) : ''}</span><b>${esc(n.title)}</b></a>`).join('')}</div>` : ''}
@@ -1049,7 +1307,12 @@
       '展示タイム・進入・チルト・展示STから、荒れそうなレースを機械的に拾っています。効き目を228,685レースで実測した結果もそのまま載せています。',
       { canonical: '/alerts' })
     const F = await doc(`features/${date}`)
-    const A = F?.alerts
+    // ★中身は LINE 友だち限定（2026-10-06）。公開側には件数しか置いていない。
+    //   鍵が無ければ null が返る。画面で隠すのではなく**窓口で止めている**。
+    const A = await memberDoc(`member/alerts/${date}`)
+    const cnt = F?.alerts?.count ?? null
+    const openCnt = F?.alerts?.open ?? null
+    const rules = A?.rules ?? F?.alerts?.rules ?? null
     const rlink = (x) => `<a href="/race/${x.race_id}">${esc(x.venue)}${x.race_no}R</a> <span class="sub">${esc(x.deadline ?? '')}</span>`
     const list = (arr, fn, n = 12) => {
       const open = (arr ?? []).filter((x) => !x.closed)
@@ -1064,27 +1327,42 @@
       maezuke: ['狙い目ではありません', '強く見えるのは「内のコースに入ったから」で、<b>同じ進入コースの艇と比べると差は消えます</b>（1.05倍）。進入が変わったという事実の通知として見てください。'],
       start: ['ほとんど差がありません', '凹んだ内の艇が4着以下になる率は <b>1.11倍</b>。1日の3分の2で鳴るので、絞り込みには使えません。'],
     }
+    // 鍵が無い人には、件数と「何が分かるか」だけを見せて友だち追加へ誘う。
+    const teaser = (key) => {
+      const n = openCnt?.[key] ?? 0, all = cnt?.[key] ?? 0
+      if (!cnt) return '<li><span class="sub">きょうの直前情報がまだありません</span></li>'
+      if (!all) return '<li><span class="sub">きょうは該当がありません</span></li>'
+      return `<li><span>きょうは <b>${all}件</b>${n ? `（締切前が${n}件）` : '（締切前はもうありません）'}</span>
+        <span class="num lockicon">LINE限定</span></li>`
+    }
     const panel = (key, title, rule, arr, fn) => `<div class="panel">
       <b>${title}</b> <span class="sub">${esc(rule ?? '')}</span>
       <p class="note"><b>${EV[key][0]}</b>　${EV[key][1]}</p>
-      <ol class="rank">${list(arr, fn)}</ol></div>`
+      <ol class="rank">${A ? list(arr, fn) : teaser(key)}</ol></div>`
+    const total = cnt ? Object.values(cnt).reduce((s, n) => s + n, 0) : 0
     view(`<h1>展示のアラート <span class="sub">${md(date)}(${wd(date)})</span></h1>
       <p>締切の約20分前に出る<b>直前情報</b>（展示タイム・進入・チルト・展示ST）から、機械的に拾っています。
-        公式が発表している事実だけを使っているので、<b>どなたでもご覧いただけます</b>。</p>
+        公式が発表している事実だけを使っています。</p>
       <p class="note">効き目は228,685レース（2022-08〜2026-10）で実測しました。期間を前半と後半に分け、
         両方で同じ結果になったものだけ「効きます」と書いています。
         外枠は元から3着内率が低いので、<b>枠と進入コースを揃えて</b>比べています。</p>
-      ${!A ? '<p class="empty">きょうの直前情報がまだありません。朝のレースが始まるとここに出ます。</p>' : `
+      ${A ? '' : `<div class="panel lock"><b>どのレースで鳴っているかは、LINEの友だち限定です</b>
+        <p>${total ? `きょうは全部で<b>${total}件</b>鳴っています。` : ''}無料です。公式LINEを友だち追加すると、
+          メニューの「注意アラート」からそのままご覧いただけます。</p>
+        <p>${C.lineAddUrl ? `<a class="cta" href="${esc(C.lineAddUrl)}" target="_blank" rel="noopener">LINEで友だち追加（無料）</a>` : ''}
+          <a class="cta ghost" href="/line">くわしく見る</a></p>
+        <p class="note">すでに友だちの方は、LINEのメニュー「注意アラート」から開いてください（合言葉が自動で付きます）。
+          月額500円の会員の方は、<a href="/member">合言葉</a>でもご覧いただけます。</p></div>`}
       <div class="grid two">
-        ${panel('makuri', 'まくりアラート', A.rules?.makuri, A.makuri, (x) =>
+        ${panel('makuri', 'まくりアラート', rules?.makuri, A?.makuri, (x) =>
           `<li><span>${rlink(x)}</span><span class="num">${waku(x.lane)} 展示${dash(x.exhibition_time)}（1号艇より${dash(x.diff)}秒速い）</span></li>`)}
-        ${panel('tilt', 'チルト跳アラート', A.rules?.tilt, A.tilt, (x) =>
+        ${panel('tilt', 'チルト跳アラート', rules?.tilt, A?.tilt, (x) =>
           `<li><span>${rlink(x)}</span><span class="num">${waku(x.lane)} ${esc(x.name ?? '')} ${x.previous_tilt != null ? dash(x.previous_tilt, 1) + '→' : ''}${dash(x.tilt, 1)}</span></li>`)}
-        ${panel('maezuke', '前づけアラート', A.rules?.maezuke, A.maezuke, (x) =>
+        ${panel('maezuke', '前づけアラート', rules?.maezuke, A?.maezuke, (x) =>
           `<li><span>${rlink(x)}</span><span class="num">${waku(x.lane)} ${esc(x.name ?? '')} → ${x.course}コース</span></li>`)}
-        ${panel('start', 'スタートアラート', A.rules?.start, A.start, (x) =>
+        ${panel('start', 'スタートアラート', rules?.start, A?.start, (x) =>
           `<li><span>${rlink(x)}</span><span class="num">${waku(x.outer_lane)}が${waku(x.inner_lane)}より${dash(x.diff)}秒速い</span></li>`)}
-      </div>`}
+      </div>
       <p class="note">アラートは買い目ではありません。<b>舟券の購入は20歳からです。</b></p>
       <p><a href="/">きょうの出走表へ →</a>　<a href="/analysis/average">コース別のデータを見る →</a></p>`)
   }
@@ -1181,6 +1459,19 @@
     <p class="sub">舟券の購入は20歳からです。追加をもって
       <a href="/terms">利用規約</a>と<a href="/privacy">プライバシーポリシー</a>に同意いただいたものとします。</p></div>`
 
+  /** 試し読み1レースの下に出す案内（2026-10-10）。
+   *  3段構え：**見るだけ＝毎日1レース ／ LINE登録＝残り全部 ／ 有料会員＝展開予想とAI予想の型**。
+   *  ⚠ 残りの本数は出すが、どのレースかは出さない（置き場の手前で止めているので中身も取れない）。 */
+  const restPanel = (n) => `<div class="panel lock"><b>${n > 0
+      ? `残り${n}本の無料予想はLINE登録（無料）で見られます`
+      : 'きょうの無料予想はこの1本です'}</b>
+    <p>上の1レースは、登録なしで毎日ご覧いただけます。
+      ${n > 0 ? `LINEの友だち追加（無料）で、<b>その日の無料予想すべて</b>（きょうは${n + 1}本）が見られます。毎朝10時にも届きます。` : 'LINEの友だち追加（無料）で、毎朝10時にもお届けします。'}</p>
+    <p>${lineBtn('LINEで無料予想を受け取る')}</p>
+    <p class="sub">さらに<a href="/member">会員（月500円）</a>では、全レースの展開予想とAI予想の型（本命・堅実・中穴・大穴）がご覧いただけます。</p>
+    <p class="sub">舟券の購入は20歳からです。追加をもって
+      <a href="/terms">利用規約</a>と<a href="/privacy">プライバシーポリシー</a>に同意いただいたものとします。</p></div>`
+
   /** LINE追加のボタン。URL未設定のときは押せるものを出さない（死んだボタンを置かない）。 */
   const lineBtn = (label) => C.lineAddUrl
     ? `<a class="cta line" href="${esc(C.lineAddUrl)}" target="_blank" rel="noopener">${esc(label)}</a>`
@@ -1204,14 +1495,19 @@
         </ul>
         <p>${lineBtn('LINEで友だち追加する')}</p>
       </div>
-      <h2>無料と会員のちがい</h2>
-      <div class="tw"><table class="t"><thead><tr><th>　</th><th>無料（LINE）</th><th>会員（月500円）</th></tr></thead>
+      <h2>3つの見かた</h2>
+      <div class="tw"><table class="t"><thead><tr><th>　</th><th>登録なし</th><th>無料（LINE）</th><th>会員（月500円）</th></tr></thead>
         <tbody>
-          <tr><th>無料予想（単勝1点）</th><td>○</td><td>○</td></tr>
-          <tr><th>各レースの1着確率</th><td>―</td><td>○</td></tr>
-          <tr><th>展開予想（全レース）</th><td>―</td><td>○</td></tr>
-          <tr><th>AI予想（3連複4点＋3連単4点）</th><td>―</td><td>○</td></tr>
+          <tr><th>出走表・直前情報・オッズ・結果</th><td>○</td><td>○</td><td>○</td></tr>
+          <tr><th>無料予想（単勝1点）</th><td><b>毎日1レース</b></td><td><b>その日の全部</b></td><td>○</td></tr>
+          <tr><th>注目レース・展示のアラート</th><td>―</td><td>○</td><td>○</td></tr>
+          <tr><th>各レースの1着確率</th><td>―</td><td>―</td><td>○</td></tr>
+          <tr><th>展開予想（全レース）</th><td>―</td><td>―</td><td>○</td></tr>
+          <tr><th>AI予想の型（本命・堅実・中穴・大穴）</th><td>―</td><td>―</td><td>○</td></tr>
+          <tr><th>展開の図（スタート〜1マーク）</th><td>―</td><td>―</td><td>○</td></tr>
         </tbody></table></div>
+      <p class="sub">登録なしでも、毎日1レースぶんの無料予想を<a href="/">トップ</a>でご覧いただけます。
+        その日に何本出しているかも出ているので、中身を見てから決めていただけます。</p>
       <p><a href="/member">会員について見る →</a></p>
       <h2>先に知っておいていただきたいこと</h2>
       <ul>

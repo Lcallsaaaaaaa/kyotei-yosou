@@ -124,6 +124,14 @@
   .orow { padding: 7px 8px; gap: 5px; }
   .orow .oval { font-size: 13.5px; }
   .tri-grid { grid-template-columns: repeat(6, 128px); min-width: 0; }
+}
+/* ⚠ 上の } を消さないこと（2026-10-06に直した）。
+   この閉じかっこが抜けていたせいで、**ここから下に書いたものが全部
+   「画面幅719px以下のときだけ効く」状態**になっていた。
+   スマホで見ると直っているのにパソコンだと直らない、という形で出る。
+   実際、枠線ボタンの文字色・アラートの件数帯・買い方の型の見た目が
+   すべてパソコンで効いていなかった。
+   追記するときは `node scripts/css-check.mjs` で波かっこの数を確かめる。 */
 
 /* ---------- 凪の左に動物キャラを置く（2026-09-23・本人指示） ----------
    .hero::before は波、.hero::after は凪のキャラで埋まっているので、
@@ -264,3 +272,86 @@ body:not(.signed-in) .only-in { display: none !important; }
 :root .cta.ghost,
 :root:not([data-theme="light"]) .cta.ghost,
 :root[data-theme="dark"] .cta.ghost { color: var(--accent); background: none; }
+
+/* アラートの件数だけを出す帯（中身はLINE友だち限定・2026-10-06）。
+   ⚠ .lock の中なので b と p は上の指定が効く。ここでは一覧の見た目だけ足す。 */
+.lock ul.inline { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 8px 0 0; padding: 0; list-style: none; }
+.lock ul.inline li { font-size: 13px; color: var(--ink-2); }
+.lock ul.inline li b { display: inline; font-size: 15px; color: var(--accent-strong); margin-left: 2px; }
+.lock ul.inline li .sub { font-size: 11.5px; }
+.num.lockicon { font-size: 11px; font-weight: 700; color: var(--signal); white-space: nowrap; }
+
+/* 買い方の型（2026-10-06）。最高配当は入口・回収率は正直さ。両方を必ず並べて出す。 */
+.ptn { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.ptn:first-of-type { border-top: 0; padding-top: 0; }
+.ptn-h { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.ptn-h b { font-size: 15px; }
+.ptn-m { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 6px 10px;
+  margin: 8px 0 0; padding: 0; list-style: none; }
+.ptn-m li { display: flex; flex-direction: column; gap: 1px; }
+.ptn-m li span { font-size: 11px; color: var(--ink-2); }
+.ptn-m li b { font-size: 14px; font-variant-numeric: tabular-nums; }
+/* 回収率は見つけやすくしておく。隠していないことが伝わるように */
+.ptn-m li.roi b { color: var(--signal); }
+.ptn-n { margin: 6px 0 0; font-size: 12.5px; color: var(--ink-2); }
+.ptn-n b { color: var(--accent-strong); }
+
+/* ---------- 展開予想の図（2026-10-06）---------- */
+/* スタート→1マークを上から見た絵。動きは「予想の説明」であって再現ではない。 */
+.tkwrap { padding-bottom: 10px; }
+.tk-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.tk-head b { font-size: 15px; }
+.tk-replay { font: inherit; font-size: 12px; padding: 5px 11px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--ink-2); cursor: pointer; }
+.tk-replay:hover { border-color: var(--accent); color: var(--accent); }
+.tk { display: block; width: 100%; height: auto; margin: 8px 0 2px; overflow: visible; }
+
+/* 水面のレーン。currentColor にしておけば明暗どちらでも読める */
+.tk-lane { stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 5; }
+.tk-start { stroke: var(--ink-2); stroke-width: 2; opacity: .55; }
+.tk-start-t, .tk-mark-t { fill: var(--ink-2); font-size: 11px; font-weight: 700; }
+.tk-mark circle { fill: none; stroke: var(--signal); stroke-width: 2.5; }
+
+/* 艇。枠色は出走表と同じ */
+.tk-hull { stroke: rgba(0, 0, 0, .25); stroke-width: 1; }
+.tk-no { font-size: 12px; font-weight: 700; }
+.tk-l1 .tk-hull { fill: #fff; stroke: #9aa7a6; } .tk-l1 .tk-no { fill: #111; }
+.tk-l2 .tk-hull { fill: #1b1b1b; } .tk-l2 .tk-no { fill: #fff; }
+.tk-l3 .tk-hull { fill: #d8322b; } .tk-l3 .tk-no { fill: #fff; }
+.tk-l4 .tk-hull { fill: #1f5fbf; } .tk-l4 .tk-no { fill: #fff; }
+.tk-l5 .tk-hull { fill: #f2c500; } .tk-l5 .tk-no { fill: #111; }
+.tk-l6 .tk-hull { fill: #179a4b; } .tk-l6 .tk-no { fill: #fff; }
+/* 予想の上位3艇だけ少し浮かせて、どれを見ればいいか分かるようにする */
+.tk-top .tk-hull { stroke: var(--accent-strong); stroke-width: 2; }
+
+/* 着順の見出し */
+.tk-rank { fill: var(--ink-2); font-size: 10.5px; font-weight: 700; }
+.tk-move { fill: var(--accent-strong); font-size: 13px; font-weight: 700; }
+
+/* ---- 動き ---- */
+/* 既定は「動き終わった形」。JSが .tk-go を付けたときだけ動かす。
+   ⚠ こうしておくと、JSが動かない環境でも figure がちゃんと読める。 */
+.tk-b { transform: translate(var(--x1), var(--y1)); }
+.tk-lab { opacity: 1; }
+.tk-go .tk-b { animation: tk-run 2.1s cubic-bezier(.33, .06, .28, 1) var(--d, 0s) both; }
+.tk-go .tk-lab { animation: tk-fade .5s ease-out both; }
+.tk-go .tk-lab1 { animation-delay: 2.0s; }
+.tk-go .tk-lab2 { animation-delay: 2.2s; }
+.tk-go .tk-lab3 { animation-delay: 2.4s; }
+@keyframes tk-run {
+  from { transform: translate(var(--x0), var(--y0)); }
+  60%  { transform: translate(calc(var(--x0) + (var(--x1) - var(--x0)) * .62), var(--y0)); }
+  to   { transform: translate(var(--x1), var(--y1)); }
+}
+@keyframes tk-fade { from { opacity: 0; } to { opacity: 1; } }
+
+/* 動きを減らす設定の人には動かさない。中身は同じものが見える */
+@media (prefers-reduced-motion: reduce) {
+  .tk-go .tk-b, .tk-go .tk-lab { animation: none; }
+  .tk-replay { display: none; }
+}
+
+.tk-n { margin: 4px 0 0; font-size: 12.5px; color: var(--ink-2); }
+.tk-n b { color: var(--ink); }
+/* 1マークへ回り込む線。絵の「向き」を示すだけの飾りなので薄く */
+.tk-turn { fill: none; stroke: var(--signal); stroke-width: 1.5; stroke-dasharray: 4 6; opacity: .45; }

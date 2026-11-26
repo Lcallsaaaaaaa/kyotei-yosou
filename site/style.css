@@ -980,3 +980,17 @@ main,
 
 /* 表が画面より広いときは、その表の中だけ横に動かす（ページ全体を横に動かさない） */
 .tw { overflow-x: auto; }
+
+/* 無料予想：中身を伏せた枠（2026-10-11）
+   試し読み1レースの下に「ほかにもある」を見せるための飾り。
+   ⚠ ここに本物の買い目を入れてはいけない。ぼかしは見た目だけで、ソースを見れば読めてしまう。
+      入っているのは作り物の文字（＊＊＊＊）だけ。 */
+.free-card.locked { position: relative; cursor: default; box-shadow: none;
+  border-left-color: var(--line); background: var(--panel-2); }
+.free-card.locked .free-head { color: var(--ink-2); }
+.free-blur { display: grid; gap: 5px; filter: blur(4.5px); opacity: .7;
+  user-select: none; -webkit-user-select: none; pointer-events: none; }
+.free-blur .waku { background: var(--line); color: var(--line); }
+.free-lock { font-size: 12px; font-weight: 700; color: var(--accent); }
+.free-lock::before { content: "🔒 "; }
+@media (prefers-reduced-motion: reduce) { .free-card.locked { transition: none; } }

@@ -27,7 +27,7 @@ window.NAGI = {
   siteUrl: 'https://boatrace-nagi.top',          // 例 'https://nagi-kyotei.com'（末尾のスラッシュなし）
                         //   ここを入れると canonical・OGP・sitemap.xml が正しいURLになる。
                         //   空のままだと sitemap が作れず、検索に出るまでが遅くなる。
-  gaId: '',             // GA4 の測定ID 例 'G-XXXXXXXXXX'（空ならアクセス解析を読み込まない）
+  gaId: 'G-KNDLLLR52H',   // GA4 の測定ID（ボートレース研究所・Lcallアカウント内のプロパティ p558217910）
   // Search Console の所有権確認は DNS(TXT)で行う。HTMLタグ方式にしたいときは index.html に直接貼ること
   //   （JSで足しても Search Console は読み取れない）
 }
