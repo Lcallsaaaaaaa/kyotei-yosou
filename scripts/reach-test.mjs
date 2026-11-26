@@ -118,11 +118,23 @@ if (process.argv.includes('--serve')) {
   // Render で動かすとき。/ を叩くと結果が返る。
   const port = Number(process.env.PORT ?? 10000)
   createServer(async (req, res) => {
+    // ★生存確認は軽く返す（2026-11-26）。
+    //   ヘルスチェックに試験そのものを割り当てると、Render が起動を確かめるたびに
+    //   boatrace.jp へ4本取りにいく（約3秒）。遅いと「起動していない」と見なされ、
+    //   立ち上げ直しを繰り返す。生死の確認と、試験の実行は別にする。
+    if (req.url === '/healthz') {
+      res.writeHead(200, { 'Content-Type': 'text/plain' })
+      res.end('ok')
+      return
+    }
     const r = await runAll()
     const json = req.url?.includes('json')
     res.writeHead(r.allOk ? 200 : 503, { 'Content-Type': json ? 'application/json' : 'text/plain; charset=utf-8' })
     res.end(json ? JSON.stringify(r, null, 2) : render(r))
-  }).listen(port, () => console.log(`到達性の試験を :${port} で待ち受け`))
+  // ★0.0.0.0 で待つこと（2026-11-26に踏んだ）。
+  //   既定（127.0.0.1）だとコンテナの外から届かず、Render は
+  //   「No open HTTP ports detected on 0.0.0.0」を出し続けて起動に失敗する。
+  }).listen(port, '0.0.0.0', () => console.log(`到達性の試験を 0.0.0.0:${port} で待ち受け`))
 } else {
   const r = await runAll()
   console.log(render(r))

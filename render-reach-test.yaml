@@ -30,7 +30,7 @@ services:
     branch: main
     buildCommand: "echo '依存なし。node 標準だけで動く'"
     startCommand: "node scripts/reach-test.mjs --serve"
-    healthCheckPath: /json
+    healthCheckPath: /healthz
     envVars:
       - key: NODE_VERSION
         value: "22"
