@@ -1,0 +1,36 @@
+# boatrace.jp が Render から取れるかを確かめるためだけの、使い捨てのサービス。
+#
+# ★目的
+#   予想を作る工場をノートPCから Render へ移す前に、これだけ先に確かめる。
+#   家庭の回線からは通っているが（2026-11-26に4項目すべて✓で実測）、
+#   データセンターのIPからだと弾かれることがある。
+#   ここが通らなければ移行そのものが成立しないので、コードを移す前に試す。
+#
+# ★使い方
+#   1. Render のダッシュボード → New → Blueprint
+#   2. リポジトリ Lcallsaaaaaaa/kyotei-yosou を選ぶ
+#   3. Blueprint のファイル名にこの render-reach-test.yaml を指定
+#   4. デプロイ後、出てきたURLを開く（/ で結果・/json で生データ）
+#   5. 判定できたら**このサービスは消す**（確かめるだけのもの）
+#
+# ★料金
+#   plan: free。無料枠の web service で足りる。
+#   15分アクセスが無いと眠るが、開けば起きる。確認用なので問題ない。
+#
+# ⚠ 「HTTP 200 なら取れている」と判断しないこと。
+#   boatrace.jp は開催の無い場に200で「データがありません」を返す。
+#   自サイトも存在しないパスに200でSPAのHTMLを返す。
+#   だから reach-test.mjs は**中身の形**（選手6人・oddsPoint 12個）まで見る。
+services:
+  - type: web
+    name: kyotei-reach-test
+    runtime: node
+    plan: free
+    region: singapore          # 日本から一番近い。遅延も一緒に測れる
+    branch: main
+    buildCommand: "echo '依存なし。node 標準だけで動く'"
+    startCommand: "node scripts/reach-test.mjs --serve"
+    healthCheckPath: /json
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
