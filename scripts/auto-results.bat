@@ -1,22 +1,24 @@
 @echo off
-rem Settle yesterday's judged bets, then build the result X post.
-rem Runs after auto-catchup (15:00), which imports the K files, the odds
-rem and the deadlines. Everything below therefore needs no network.
+rem Settle yesterday's judged bets, then build the result X post. Runs at 15:30.
 rem
-rem Order matters:
-rem   1. paper-day    record the FULL-DAY judgment for yesterday (all races,
-rem                   pre-deadline odds only, deadline order, daily cap).
-rem                   Needs races.deadline, which auto-catchup just imported.
-rem   2. results      settle what was actually bought (bets)
-rem   3. paper-report score the full-day judgment against the payouts
-rem   4. bt-build     rebuild the backtest table so scripts/backtest.mjs stays current
-rem   5. x-post       build the result post
+rem The steps moved into scripts/results.sh on 2026-10-15, because the sleep
+rem guard (keepawake-run.ps1) can only be handed a .sh path -- a compound
+rem command written straight into the .bat cannot be passed to it.
+rem   The task option "Wake the computer to run" only WAKES the machine; it does
+rem   not stop it from going back to sleep DURING the run. On 2026-10-15 the
+rem   machine slept mid-run and the 05:00, 06:00 and 15:30 tasks all died
+rem   (results 267014 / 3221225786). No news article was written that day.
+rem
+rem The order of the steps, and why bt-build is NOT here, are documented at the
+rem top of scripts/results.sh.
 rem
 rem ASCII only: cmd.exe reads this file as Shift-JIS.
 setlocal enabledelayedexpansion
 cd /d "%~dp0.."
 if not exist logs mkdir logs
 for /f %%a in ('powershell -NoProfile -Command "Get-Date -Format yyyy-MM-dd"') do set TODAY=%%a
-for /f %%a in ('powershell -NoProfile -Command "(Get-Date).AddDays(-1).ToString('yyyy-MM-dd')"') do set YDAY=%%a
-"C:\Program Files\Git\bin\bash.exe" -lc "cd \"$(cygpath -u '%CD%')\" && export PATH='/c/Program Files/nodejs:$PATH' && node scripts/paper-day.mjs --date !YDAY! > logs/paper-!YDAY!.txt 2>&1; node scripts/results.mjs > logs/results-!TODAY!.txt 2>&1 && node scripts/paper-report.mjs --date !YDAY! >> logs/results-!TODAY!.txt 2>&1 && node --max-old-space-size=8192 scripts/bt-build.mjs > logs/bt-!TODAY!.txt 2>&1; node scripts/x-post.mjs --result >> logs/results-!TODAY!.txt 2>&1"
+set LOG=logs\results-run-!TODAY!.log
+echo ==== !TODAY! !TIME! results start ==== >> "!LOG!"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0keepawake-run.ps1" -Script "scripts/results.sh" >> "!LOG!" 2>&1
+echo ==== !TIME! results done (exit !ERRORLEVEL!) ==== >> "!LOG!"
 endlocal

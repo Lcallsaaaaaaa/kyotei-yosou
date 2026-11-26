@@ -20,6 +20,7 @@
 //   2) 前のモデルとの直接比較（重なるレースが7日以上あるとき）
 //        同じレースで 1着logloss が前より悪くない（+0.002まで）／ 1着的中が1pt以上落ちない
 //      前のモデルの pred3 は、そのレースを学習に使っていないので公平に比べられる。
+import './prio.mjs'   // 予定タスク経由だと BelowNormal になる。自分で上げる
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync, renameSync, rmSync, writeFileSync } from 'node:fs'
@@ -174,7 +175,7 @@ if (argv.includes('--adopt')) {
   const m = swap('model5.json', 'model5.new.json', 'model5.prev.json')
   const f = swap('model5-full.json', 'model5-full.new.json', 'model5-full.prev.json')
   // ⚠ pred3 は閾値（無料枠0.80・配信0.7645）を出す元。モデルと必ず一緒に入れ替える。
-  db.exec('BEGIN')
+  db.exec('BEGIN IMMEDIATE')
   db.exec('DROP TABLE IF EXISTS pred3_prev')
   if (has('pred3')) db.exec('ALTER TABLE pred3 RENAME TO pred3_prev')
   db.exec('ALTER TABLE pred3_new RENAME TO pred3')

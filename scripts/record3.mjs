@@ -105,7 +105,7 @@ if (SHOW) {
 }
 
 // ---------- 記録 ----------
-const DATE = flag('date') || new Date().toISOString().slice(0, 10)
+const DATE = flag('date') || new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10)
 const f = join(ROOT, 'data', `predict-${DATE}.json`)
 if (!existsSync(f)) { console.error(`${f} がありません。先に predict.mjs を走らせること`); process.exit(1) }
 const j = JSON.parse(readFileSync(f, 'utf8'))

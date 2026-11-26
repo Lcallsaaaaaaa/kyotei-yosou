@@ -9,6 +9,7 @@
 //   そこで判定結果を「1号艇のA1率」で検証する。
 //   SG/G1は実測でA1率100%、G3・一般は0〜5%と綺麗に分かれるので答え合わせになる。
 
+import './prio.mjs'   // 予定タスク経由だと BelowNormal になる。自分で上げる
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
@@ -169,7 +170,7 @@ for (const g of GRADES) {
 if (process.argv.includes('--apply')) {
   try { db.exec('ALTER TABLE races ADD COLUMN grade TEXT') } catch {}
   const upd = db.prepare('UPDATE races SET grade=? WHERE series=?')
-  db.exec('BEGIN')
+  db.exec('BEGIN IMMEDIATE')
   for (const s of series) upd.run(gradeOf(s.series), s.series)
   db.exec('COMMIT')
   console.log('\n✅ races.grade に書き込みました')

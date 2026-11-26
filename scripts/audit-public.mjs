@@ -59,6 +59,14 @@ for (const [k, b] of openPub) {
   // 予想の数字も、誰でも見られる側には一切出さない（2026-09-26）
   for (const bad of ['"win_probability"', '"tenkai":{', '"honmei"'])
     if (s.includes(bad)) fail(k, 'に予想の数字', bad)
+  // アラートの中身も LINE 友だち限定（2026-10-06）。公開側に残すのは件数だけ。
+  // ⚠ 画面で隠すだけだと /data/features/<日付>.json を直接叩かれて素通しになる
+  if (k.startsWith('features/')) {
+    const al = b?.alerts
+    for (const kind of ['makuri', 'tilt', 'maezuke', 'start'])
+      if (Array.isArray(al?.[kind]) && al[kind].length) fail(k, `にアラートの中身 ${kind} が ${al[kind].length}件`)
+    if (al && !al.line_required) fail(k, 'のアラートに line_required の印が無い（古い形で送られている）')
+  }
 }
 
 // ④ メール登録した人ぶんに、月500円の中身が紛れていないこと

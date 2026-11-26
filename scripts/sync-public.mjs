@@ -15,12 +15,13 @@
 //   ・無料枠を守るため、中身が変わっていないものは送らない（前回の中身の指紋と比べる）。
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, rmSync, statSync, utimesSync, renameSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { apiRoute } from './api.mjs'
 import { seal, isSealed, periodOf, phraseOf, open as unseal } from './seal.mjs'
 import { r2Config, putObject, deleteObject } from './r2.mjs'
+import { pickTaster, assertTaster, tasterDoc } from './taster.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const argv = process.argv.slice(2)
@@ -28,6 +29,21 @@ const LOCAL = argv.includes('--local'), LIVE = argv.includes('--live')
 const WRITE_LOCAL = LOCAL || argv.includes('--write-local')   // 送りつつ静的HTMLの材料も残す
 const OUT = join(ROOT, 'site', '_local')
 const STATE = join(ROOT, 'data', 'sync-public-state.json')   // 送った中身の指紋
+// ★選手ページに使ってよい時間の上限（分）。0 なら全員まわす（2026-11-01）。
+//   実測：1人あたり3.4秒・1,626人で92分。書き出し全体が約98分かかるのに
+//   publish の1工程の上限は80分なので、**毎晩必ず時間切れで落ちていた**。
+//   その結果 10/23〜11/01 の9日間、静的HTMLが1度も更新されず、
+//   検索からの表示が消えた（サイトマップの lastmod が全件 10/23 のまま）。
+//   遅い原因は索引ではなくディスク読み（4.8GBのDBに空きメモリ0.6GB）なので、
+//   速くするのではなく**選手ページを毎晩の公開から外す**。
+//   当日のレース・ニュース・サイトマップだけなら約6分で終わる。
+//   選手ページは時間の許すぶんだけ、古い順に少しずつ入れ替える。
+const RACER_MINUTES = (() => {
+  const i = argv.indexOf('--racer-minutes')
+  if (i > -1 && argv[i + 1] != null) return Number(argv[i + 1])
+  return LOCAL ? 20 : 0        // 送信（--live/--once）は今までどおり全員
+})()
+const RSTATE = join(ROOT, 'data', 'sync-racers-state.json')   // 選手ごとの最終更新日
 const jst = () => new Date(Date.now() + 9 * 3600e3)
 const today = () => jst().toISOString().slice(0, 10)
 const addDays = (d, n) => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10) }
@@ -82,13 +98,22 @@ function memberRace(j) {
   const { prediction, picks, tenkai, entries } = j.race
   const probs = (entries ?? []).filter((e) => e.win_probability != null)
     .map((e) => ({ lane: e.lane, win_probability: e.win_probability, top2_probability: e.top2_probability ?? null }))
-  if (!tenkai && !probs.length && !picks?.plan2 && !picks?.haishin) return null
+  // ⚠ 新しい買い目の種類を足したら、ここにも足すこと。
+  //   足し忘れると「買い目はあるのに paid/ へ送られない」＝会員に届かない
+  //   （patterns を足した2026-10-06に実際に落ちかけた）
+  if (!tenkai && !probs.length && !picks?.plan2 && !picks?.haishin && !picks?.patterns) return null
   const { free_win, spot, ...paidPicks } = picks ?? {}
   return { race_id: j.race.race_id, tenkai: tenkai ?? null, probs: probs.length ? probs : null,
     picks: Object.keys(paidPicks).length ? paidPicks : null, prediction: prediction ?? null }
 }
 function assertNoPaid(key, obj) {
   const s = JSON.stringify(obj)
+  // ★試し読み（taster/）だけは、1レースぶんの予想を誰でも見られる側に出す（2026-10-10 本人指示）
+  //   「サイトを見るだけなら毎日1レース／それ以外を見るならLINE登録／そのあと有料会員」。
+  //   いまは未登録の人に**1本も見せていない**ので、入口が閉じていた。
+  //   ⚠ 見張りを緩めるのではなく、**ここだけ別の見張りに差し替える**。
+  //     中身が1本であることと、ほかの予想物が混ざっていないことを必ず確かめる。
+  if (key.startsWith('taster/')) return assertTaster(key, obj)   // scripts/taster.mjs
   // 二重の安全装置：有料の項目名が1つでも混ざっていたら送らない
   //   （実績の集計 results の plan2・b2 などは的中率の数字だけで買い目ではないので対象外。買い目は必ず配列で入る）
   for (const bad of ['"prediction":', '"picks":', '"trio":[', '"trifecta":[', '"exacta":['])
@@ -98,6 +123,8 @@ function assertNoPaid(key, obj) {
   for (const bad of ['"win_probability"', '"probability"', '"tenkai":{', '"honmei"'])
     if (s.includes(bad)) throw new Error(`${key} に予想の数字 ${bad} が入っている。送らずに止める`)
 }
+// 試し読みの決め方・見張りは scripts/taster.mjs に置いてある（試験できるようにするため）。
+const TASTER_FILE = join(ROOT, 'data', 'taster.json')
 
 // ---------- 二重起動を止める ----------
 // ★ --once と --live が同時に走ると、どちらも起動時に state を読んで終わりに書き戻すので、
@@ -136,7 +163,21 @@ if (!LOCAL) {
 }
 
 // ---------- 送る（または書き出す） ----------
-const state = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8')) : {}
+// ★状態ファイルが壊れていても起動すること（2026-10-24）。
+//   ここは長らく try/catch 無しで JSON.parse していた。158KBのこのファイルは
+//   **強制終了や再起動の途中で中途半端に書かれる**ことがあり、そうなると
+//   公開の常駐が起動直後に落ち続ける。watchdog が立て直しても同じ所で落ちるので、
+//   **サイトが永久に更新されなくなる**（10/24の再起動で現実に起きかけた）。
+//   読めなければ空から始める。全件送り直しになるだけで、止まるよりはるかによい。
+//   ⚠ BOMも落とす。PowerShell の Out-File -Encoding utf8 はBOM付きで書く。
+const state = (() => {
+  if (!existsSync(STATE)) return {}
+  try { return JSON.parse(readFileSync(STATE, 'utf8').replace(/^﻿/, '')) }
+  catch (e) {
+    log(`状態ファイルが読めません（${String(e.message).slice(0, 60)}）。空から送り直します`)
+    return {}
+  }
+})()
 // ★指紋から now（書類を作った時刻）を外す（2026-09-27）。
 //   api.mjs はどの書類にも now を入れる。中身が1文字も変わっていなくても
 //   毎回ちがう値になるので、**「変化なしなら送らない」が一度も効いていなかった**。
@@ -187,6 +228,7 @@ async function putRaw(docs) {
       for (;;) {
         const d = todo[i++]
         if (!d || fail) return
+        beat()   // ★送信が長引く回も鼓動を絶やさない（watchdogは20分の無音で殺す）
         try { await putObject(R2, d.key + '.json', JSON.stringify(d.body)) }
         catch (e) { fail = e; return }
         state[d.key] = d.h
@@ -258,7 +300,7 @@ async function removeOld(keepDates) {
   const keep = new Set(keepDates.map((d) => d.replace(/-/g, '')))
   const old = (k) => {
     const m = k.match(/^(?:paid\/|member\/)?race\/(\d{8})-/)
-      ?? k.match(/^(?:paid\/|member\/)?(?:races|tenkai|features|free)\/(\d{4}-\d{2}-\d{2})$/)
+      ?? k.match(/^(?:paid\/|member\/)?(?:races|tenkai|features|free|alerts|taster)\/(\d{4}-\d{2}-\d{2})$/)
     return m && !keep.has(m[1].replace(/-/g, ''))
   }
   // 手元の写しも掃除する。⚠ LOCAL のときだけでなく **--write-local のときも**。
@@ -281,11 +323,30 @@ async function removeOld(keepDates) {
 }
 
 // ---------- 1日ぶん ----------
+// ★作業中も鼓動を打つ（2026-10-19）
+//   watchdog は data/sync-public-state.json の更新時刻を鼓動として見ていて、
+//   レースのある時間帯に25分止まっていたら「固まった」と見なして殺す。
+//   ところが鼓動を書いていたのは「何か送ったとき」と「1周終わったとき」だけ。
+//   下のループは**レース1本ずつDBを引く**ので132〜156回まわる。送るものが無い周は
+//   そのあいだ完全に無音になり、機械が重い日は25分を超えて**働いているのに殺される**。
+//   殺されると立て直しで全件送り直しになり、さらに遅くなる悪循環に入る（10/19に5回）。
+//   → ループの中でも、30秒に1回だけファイルの時刻を更新する。
+//   ⚠ 中身は変えない（指紋を壊さない）。時刻だけ新しくする。
+let lastBeat = 0
+const beat = () => {
+  const now = Date.now()
+  if (now - lastBeat < 30_000) return
+  lastBeat = now
+  try { utimesSync(STATE, new Date(), new Date()) }
+  catch { try { writeFileSync(STATE, JSON.stringify(state)) } catch { /* 書けなくても続ける */ } }
+}
+
 async function syncDay(date, withRacers) {
   const races = call(`/api/v1/races?date=${date}`)
   if (!races || races.status !== 'ok') return 0
   const docs = [], paid = [], member = []
   for (const r of races.races) {
+    beat()
     const j = call(`/api/v1/race?id=${r.race_id}`)
     const d = publicRace(j)
     r.free_pick = !!d?.race?.has_free_pick     // 印だけ。中身はメール登録した人向け（member/）
@@ -309,25 +370,54 @@ async function syncDay(date, withRacers) {
     tk.races = tk.races.map((r) => ({ ...r, tenkai: null, member_only: !!r.tenkai }))
   }
   // 注目レース（ガチガチ・穴）は「AIの本命の1着確率」そのものなので会員限定にする。
-  // アラート（まくり・前づけ・チルト・スタート）は展示タイムやチルトから作っていて
-  // 1着予想ではないので、無料のまま残す。
+  //
+  // ★アラートも LINE 友だち限定にした（2026-10-06・本人判断）
+  //   「基本的にはリッチメニューLINE登録が必須」。
+  //   公式データから作っているので誰に見せても差し支えは無いが、
+  //   **これが友だち追加の見返り**なので、中身は member/ へ置いて窓口で止める。
+  //   公開側に残すのは**件数だけ**（「きょうは12件」と誘えるように）。
+  //   画面だけで隠すと /data/features/<日付>.json を直接叩かれて素通しになる。
   const F = call(`/api/v1/features?date=${date}`)
+  const memberDocs = []
   if (F) {
     const { gachigachi, ana, ...pub } = F
     if (gachigachi || ana) paid.push([`paid/features/${date}`, { date, gachigachi, ana }])
     F.gachigachi = null; F.ana = null
     F.member_only = !!(gachigachi?.races?.length || ana?.races?.length)
     void pub
+    const A = F.alerts
+    if (A) {
+      const KINDS = ['makuri', 'tilt', 'maezuke', 'start']
+      const body = { date, rules: A.rules ?? null }
+      for (const k of KINDS) body[k] = A[k] ?? []
+      memberDocs.push([`member/alerts/${date}`, body])
+      paid.push([`paid/alerts/${date}`, body])          // 会員は合言葉でも開ける
+      // 公開側は件数と条件文だけ。締切前が何本あるかも出す（誘い文に使う）
+      const open = (xs) => (xs ?? []).filter((x) => !x.closed).length
+      F.alerts = { rules: A.rules ?? null, line_required: true,
+        count: Object.fromEntries(KINDS.map((k) => [k, (A[k] ?? []).length])),
+        open: Object.fromEntries(KINDS.map((k) => [k, open(A[k])])) }
+    }
   }
   // ★無料枠は、有料会員にも開けるようにする（2026-10-05）
   //   無料枠の鍵は LINE 側（FREE_KEY）にしかなく、合言葉では開けなかった。
   //   **お金を払った人が無料予想を見られない**という逆さまの状態だったので、
   //   同じ中身を paid/ にも入れて、合言葉でも開くようにする。
   if (member.length) paid.push([`paid/free/${date}`, { date, count: member.length, picks: member }])
+  // ★試し読み：その日の無料枠のうち**1本だけ**を、誰でも見られる側に出す（2026-10-10 本人指示）
+  //   未登録 → 毎日1レース ／ LINE登録 → 残り全部 ／ 有料会員 → 展開予想＋AI予想の型。
+  //   どのレースかは pickTaster() が日ごとに1回だけ決めて data/taster.json に固定する。
+  const taster = pickTaster(TASTER_FILE, date, member, { log })
+  docs.push([`taster/${date}`, tasterDoc(date, taster, member.length)])
+  // 一覧とレース画面で「このレースは誰でも見られる」と分かるようにする
+  if (taster) {
+    for (const r of races.races) if (r.race_id === taster.race_id) r.taster = true
+    for (const [k, d] of docs) if (k === `race/${taster.race_id}` && d?.race) d.race.taster = true
+  }
   docs.unshift([`races/${date}`, races], [`tenkai/${date}`, tk], [`features/${date}`, F])
   await put(docs)
   await putPaid(paid, date)
-  await putMember([[`member/free/${date}`, { date, count: member.length, picks: member }]])
+  await putMember([[`member/free/${date}`, { date, count: member.length, picks: member }], ...memberDocs])
   if (withRacers) {
     const ids = new Set()
     for (const [k, d] of docs) if (k.startsWith('race/')) for (const e of d?.race?.entries ?? []) if (e.racer_id) ids.add(e.racer_id)
@@ -342,20 +432,70 @@ async function syncCommon() {
   // 開催予定と、各開催の出場予定選手（あっせん）
   const sch = call('/api/v1/schedule')
   docs.push(['schedule', sch])
-  for (const m of sch?.meetings ?? []) docs.push([`meeting/${m.jcd}/${m.start_date}`, call(`/api/v1/meeting?jcd=${m.jcd}&start=${m.start_date}`)])
+  // ★ここも鼓動を打つ。開催は130件前後あり、選手巡回に入る前に数分かかる。
+  for (const m of sch?.meetings ?? []) { beat(); docs.push([`meeting/${m.jcd}/${m.start_date}`, call(`/api/v1/meeting?jcd=${m.jcd}&start=${m.start_date}`)]) }
   // データ分析（全国・場のコース別平均／コース別ランキング／出目分析／優勝戦）
-  for (const k of ['average', 'ranking', 'demoku', 'yusho']) docs.push([`analysis/${k}`, call(`/api/v1/analysis?kind=${k}`)])
-  for (let j = 1; j <= 24; j++) docs.push([`venue/${j}`, call(`/api/v1/venue?jcd=${j}`)])
+  for (const k of ['average', 'ranking', 'demoku', 'yusho']) { beat(); docs.push([`analysis/${k}`, call(`/api/v1/analysis?kind=${k}`)]) }
+  for (let j = 1; j <= 24; j++) { beat(); docs.push([`venue/${j}`, call(`/api/v1/venue?jcd=${j}`)]) }
   // 選手一覧と、直近180日に出走した全選手のページ（日和の「選手一覧」にあたる）。1日1回
   const list = call('/api/v1/racers')
   docs.push(['racers', list])
   await put(docs)
+  const order = racerOrder(list?.racers ?? [])
+  const deadline = RACER_MINUTES > 0 ? Date.now() + RACER_MINUTES * 60_000 : Infinity
+  let refreshed = 0, kept = 0
+  const rstate = loadRacerState()
   const rd = []
-  for (const r of list?.racers ?? []) {
+  for (const r of order) {
+    // ★時間切れになったら、残りは前回の書き出しをそのまま使う。
+    //   ファイルは site/_local に残っているので prerender は困らない。
+    //   ただし**サイトマップから消えないように鍵だけは必ず足す**（これを
+    //   忘れると1,626本のURLが一晩で消える）。
+    if (Date.now() >= deadline && existsSync(join(OUT, `racer__${r.racer_id}.json`))) {
+      allKeys.add(`racer/${r.racer_id}`); kept++
+      continue
+    }
+    // ⚠ ここにも鼓動が要る（2026-10-20に踏んだ）。
+    //   10/19に beat() を入れたのは syncDay のレース巡回**だけ**だった。
+    //   立て直し直後の全件送信は syncDay のあとに**この1,600人超の巡回**へ入り、
+    //   そこから先は完全に無音になる。putRaw は「送るものが無ければ即return」なので、
+    //   変化の無い選手が続くと state も更新されない＝鼓動が出ない。
+    //   watchdog は20分の無音で殺すので、**全件送信の途中で必ず殺され、
+    //   最初からやり直し**になる。10/20はこれで1時間以上サイトが止まった。
+    //   直したつもりで片方しか塞いでおらず、**見える失敗を静かな無限ループに変えていた**。
+    beat()
+    rstate[r.racer_id] = today()
+    refreshed++
     rd.push([`racer/${r.racer_id}`, call(`/api/v1/racer?id=${r.racer_id}`)])
-    if (rd.length >= 100) { await put(rd.splice(0)) }
+    if (rd.length >= 100) { await put(rd.splice(0)); saveRacerState(rstate) }
   }
   await put(rd)
+  saveRacerState(rstate)
+  if (RACER_MINUTES > 0) log(`選手ページ：作り直し ${refreshed}人／前回のまま ${kept}人（上限 ${RACER_MINUTES}分）`)
+}
+// ★作り直す順番。古いものから先に当てる（2026-11-01）。
+//   ① 一度も作っていない選手　② 最後に作った日が古い選手　の順。
+//   こうしておくと、毎晩少しずつでも全員が一巡する。
+function racerOrder(racers) {
+  const st = loadRacerState()
+  return [...racers].sort((a, b) => (st[a.racer_id] ?? '').localeCompare(st[b.racer_id] ?? '')
+    || a.racer_id - b.racer_id)
+}
+let _rstate = null
+function loadRacerState() {
+  if (_rstate) return _rstate
+  try { _rstate = JSON.parse(readFileSync(RSTATE, 'utf8').replace(/^﻿/, '')) }
+  catch { _rstate = {} }
+  return _rstate
+}
+function saveRacerState(s) {
+  // ★PID付きの仮名で書いてから置き換える。固定名だと別の処理と混ざって壊れる。
+  try {
+    const tmp = RSTATE + '.' + process.pid + '.tmp'
+    writeFileSync(tmp, JSON.stringify(s))
+    JSON.parse(readFileSync(tmp, 'utf8'))
+    renameSync(tmp, RSTATE)
+  } catch { /* 書けなくても公開は続ける */ }
 }
 // ---------- 記事（ニュース・場の攻略） ----------
 // ニュース：content/news/*.md（scripts/news.mjs の自動生成＋人やGPTが書いたもの）→ news/index と news/<名前>
@@ -443,8 +583,23 @@ function writeSeoFiles() {
 // 合言葉が正しいかを確かめるためだけの、中身のない小さな箱。
 // これが無いと、その日の有料データがまだ無いときに「合っているか分からないまま会員として開く」ことになり、
 // 画面が「会員です」と出したのに何も開かない、という食い違いが起きる（2026-09-23の指摘）。
+// ★翌月ぶんも先に出しておく（2026-10-09に直した）
+//   以前は「今日の月」だけ作っていた。ところが**来月の合言葉は月末に配る**運用
+//   （/kagi も会員ページも「翌月ぶんは月末にお知らせします」と書いてある）。
+//   受け取った人が月末にその場で入れると、翌月の確認用の箱がまだ無いので
+//   **「いまこの月の合言葉を確かめられません」で弾かれる**。
+//   打ちまちがいだと思って何度も入れ直すことになる。毎月起きていた。
+//   中身の無い小さな箱なので、先に出しておいて困ることはない。
 async function syncPaidCheck(date) {
-  await putPaid([[`paid/check/${periodOf(date)}`, { ok: true, period: periodOf(date) }]], date)
+  const nextPeriod = (p) => {
+    const [y, m] = p.split('-').map(Number)
+    return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`
+  }
+  const cur = periodOf(date)
+  const nxt = nextPeriod(cur)
+  await putPaid([[`paid/check/${cur}`, { ok: true, period: cur }]], date)
+  // 翌月ぶんは**翌月の合言葉で閉じる**必要があるので、翌月の日付を渡す
+  await putPaid([[`paid/check/${nxt}`, { ok: true, period: nxt }]], `${nxt}-01`)
 }
 
 async function syncMeta(dates) {
@@ -485,12 +640,20 @@ for (;;) {
     const full = lastFull !== d0 || (jst().getUTCHours() === 7 && lastFull !== d0 + '-7')
     const before = sent
     await syncDay(d0, full)
+    // ★meta は「今日のレースを送り終えた直後」に送る（2026-10-20）
+    //   ⚠ 以前は full の周だけ**最後**に送っていた（下の else が non-full 用）。
+    //     立て直し直後の全件送信は syncCommon で選手1,600人超を回るので**数時間**かかり、
+    //     そのあいだ meta は古いまま＝画面に「データの更新が93分止まっています」と出る。
+    //     ところが当日のレースは syncDay の時点で**すでに送れている**（10/20は実測で
+    //     本番の締切済みが 17→28 に進んでいた）。つまり**画面が嘘をついていた**。
+    //     お金を払っている会員が見る表示なので、ここは実態に合わせる。
+    await syncMeta([addDays(d0, -1), d0, addDays(d0, 1)])
     if (full) {
       await syncDay(addDays(d0, 1), false)
       await syncCommon()
       await syncArticles()
       await syncPaidCheck(d0)
-      await syncMeta([addDays(d0, -1), d0, addDays(d0, 1)])
+      await syncMeta([addDays(d0, -1), d0, addDays(d0, 1)])   // 全件送信の最後にもう一度
       await removeOld([addDays(d0, -1), d0, addDays(d0, 1)])
       lastFull = jst().getUTCHours() === 7 ? d0 + '-7' : d0
       const n = writeSeoFiles()
@@ -501,7 +664,8 @@ for (;;) {
     //   画面上部の「データの更新が◯分止まっています」は meta を見ているので、
     //   正常に動いている日でも夕方には「6時間止まっています」と出ていた。
     //   欠品の見張り（kesson.mjs）も meta を見るので、ここが古いと嘘の警報になる。
-    else await syncMeta([addDays(d0, -1), d0, addDays(d0, 1)])
+    //   ⚠ 2026-10-20：その送信を上（syncDay の直後）へ移した。full/非full の
+    //     どちらの周でも同じ場所で送るので、ここに else は要らない。
     if (sent > before) log(`送信 ${sent - before}件`)
   } catch (e) { log('失敗:', e.message) }
   // ★1周終わったことを必ず記録する（2026-10-05・これが2時間停止の真因）

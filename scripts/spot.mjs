@@ -17,6 +17,7 @@
 // ⚠ 全レース出すので的中率は下がる。絞りなしの実測は
 //   3連複4点 63.70% / 3連単4点 30.53%（自信度で絞ると82.62% / 45.73%）。
 //   企画物として出す前提で、通常配信の数字と並べて語らないこと。
+import './prio.mjs'   // 予定タスク経由だと BelowNormal になる。自分で上げる
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFileSync, existsSync } from 'node:fs'
@@ -89,7 +90,7 @@ if (argv.includes('--fill')) {
   }
   const upd = db.prepare(`UPDATE spot_daily SET hit=?, payout=? WHERE race_id=? AND kind=? AND rank=?`)
   let n = 0
-  db.exec('BEGIN')
+  db.exec('BEGIN IMMEDIATE')
   for (const r of rows) {
     const w = WIN.get(r.race_id)
     if (!w || !w[1] || !w[2] || !w[3]) continue
@@ -105,7 +106,7 @@ if (argv.includes('--fill')) {
 }
 
 // ---------- 記録 ----------
-const DATE = flag('date') || new Date().toISOString().slice(0, 10)
+const DATE = flag('date') || new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10)
 
 // ★--auto ＝ その日のグレードレースを自動で拾う（毎日2時のバッチはこれを使う）
 //   対象は G1・SG・G2 だけ。G3は1号艇のA1率が13〜21%で一般戦(20.9%)と同水準なので
@@ -296,7 +297,7 @@ const ins = db.prepare(`INSERT INTO spot_daily
 //   走り終えたレースの予想は**歴史**なので、モデルを入れ替えても書き換えない。
 const stamp = new Date().toISOString()
 let n = 0
-db.exec('BEGIN')
+db.exec('BEGIN IMMEDIATE')
 for (const x of picks) {
   const a = [x.r.race_id, DATE, JCD, x.r.venue, x.r.race_no, DL.get(x.r.race_id) ?? null,
     x.r.series ?? null, x.r.day_no ?? null, x.conf]

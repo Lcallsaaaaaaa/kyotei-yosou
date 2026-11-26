@@ -96,11 +96,6 @@ ok('JSONとして読み直せる', Array.isArray(after.races))
 
 const bm = new Map(before.races.map((r) => [r.race_id, r]))
 const changed = after.races.filter((r) => JSON.stringify(bm.get(r.race_id)?.first) !== JSON.stringify(r.first))
-// ⚠ 「入れ替えた数」と「中身が変わった数」は一致しない。
-//   直前に同じモデル・同じ直前情報で走らせたあとだと、入れ替えても値は同じになる
-//   （2026-10-03に実際にここで落ちた）。見るべきは**対象外のレースを触っていないこと**。
-ok('変わったのは対象レースだけ', changed.every((r) => target.includes(r.race_id)) && changed.length <= nTarget,
-  `入れ替え${nTarget} / 中身が変わった${changed.length}（同じ値なら0でも正しい）`)
 
 // 締切・展示の条件
 const DL = new Map()
@@ -108,6 +103,18 @@ for (const r of db.prepare(`SELECT race_id, deadline FROM races WHERE date=?`).a
 try { for (const r of db.prepare(`SELECT race_id, deadline FROM race_meta WHERE date=? AND deadline IS NOT NULL`).all(TODAY)) if (!DL.get(r.race_id)) DL.set(r.race_id, r.deadline) } catch {}
 const exCnt = new Map(db.prepare(`SELECT race_id, COUNT(*) n FROM before_info WHERE substr(race_id,1,8)=? AND ex_time IS NOT NULL GROUP BY race_id`).all(ymd).map((r) => [r.race_id, r.n]))
 const waveOk = new Set(db.prepare(`SELECT race_id FROM before_race WHERE substr(race_id,1,8)=? AND wave IS NOT NULL`).all(ymd).map((r) => r.race_id))
+
+// chokuzen.mjs が入れ替えるはずのレース（展示6艇そろい・波あり・締切前）を、ここでも組み立てて照合する。
+// ⚠ 2026-10-06まで `target` という未定義の変数を見ていて、
+//   「中身が変わったレースが1つ以上あるとき」だけ ReferenceError で落ちる状態だった。
+const targetIds = new Set(after.races.map((r) => r.race_id)
+  .filter((id) => exCnt.get(id) === 6 && waveOk.has(id) && (DL.get(id) ?? '00:00') > HHMM))
+
+// ⚠ 「入れ替えた数」と「中身が変わった数」は一致しない。
+//   直前に同じモデル・同じ直前情報で走らせたあとだと、入れ替えても値は同じになる
+//   （2026-10-03に実際にここで落ちた）。見るべきは**対象外のレースを触っていないこと**。
+ok('変わったのは対象レースだけ', changed.every((r) => targetIds.has(r.race_id)) && changed.length <= nTarget,
+  `入れ替え${nTarget} / 中身が変わった${changed.length}（同じ値なら0でも正しい）`)
 
 ok('締切を過ぎたレースは変えていない', changed.every((r) => (DL.get(r.race_id) ?? '00:00') > HHMM),
   changed.filter((r) => (DL.get(r.race_id) ?? '00:00') <= HHMM).map((r) => r.race_id).join(' ') || '該当なし')

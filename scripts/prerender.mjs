@@ -50,7 +50,19 @@ if (!existsSync(LOCAL)) { console.error('site/_local がありません。先に
 const cfg = (() => { const w = {}; new Function('window', readFileSync(join(SITE, 'config.js'), 'utf8'))(w); return w.NAGI ?? {} })()
 const BASE = (cfg.siteUrl || '').replace(/\/+$/, '')
 const SITE_NAME = cfg.siteName || 'ボートレース研究所'
-const shell = readFileSync(join(SITE, 'index.html'), 'utf8')
+// ⚠ canonical と og:url は**外枠から外してから**付け直す（2026-10-10に実際に踏んだ）
+//   stampAssets と同じ罠。外枠（shell）は site/index.html を読んでいて、
+//   その index.html も page() の出力としてここで書き出している。
+//   page() は </head> の直前に canonical と og:url を**足している**ので、
+//   次の回はそれを含む index.html を外枠として読み、また足す。
+//   実際に13回ぶん溜まり、**全2,036ページに canonical が14個**（13個がトップ指し）
+//   という状態になっていた。Googleは canonical が複数あると**全部無視する**ので、
+//   SEOのためのサイトで canonical が丸ごと効いていなかった。
+//   （ld+json は溜まらない。トップページは ld を渡していないので足されない）
+const stripInjected = (html) => html
+  .replace(/^[ \t]*<link rel="canonical"[^>]*>\r?\n?/gm, '')
+  .replace(/^[ \t]*<meta property="og:url"[^>]*>\r?\n?/gm, '')
+const shell = stripInjected(readFileSync(join(SITE, 'index.html'), 'utf8'))
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 const doc = (key) => {
@@ -74,8 +86,28 @@ const VER = (() => {
   for (const f of ASSETS) { try { h.update(readFileSync(join(SITE, f))) } catch { /* 無ければ飛ばす */ } }
   return h.digest('hex').slice(0, 8)
 })()
-const stampAssets = (html) => ASSETS.reduce((s, f) =>
-  s.replaceAll(`"/${f}"`, `"/${f}?v=${VER}"`), html)
+// ⚠ 先に付いている印を**必ず外してから**付け直すこと（2026-10-06に実際に踏んだ）
+//   外枠（shell）は site/index.html を読んでいて、その index.html もここで書き出している。
+//   つまり2回目以降は `"/app.js?v=xxxx"` の形になっていて `"/app.js"` に当たらない。
+//   そのため**印が最初の1回で固まり、中身を変えても更新されなかった**。
+//   結果：新しい app.js を公開しても、ブラウザは同じURLを握ったまま古い中身を使う
+//   （/alerts をLINE限定にしたのに画面が変わらなかった）。
+const stampAssets = (html) => {
+  // ① 先に付いている印を外す（"/app.js?v=abcd1234" → "/app.js"）
+  let s = html
+  for (const f of ASSETS) {
+    for (;;) {
+      const i = s.indexOf(`"/${f}?v=`)
+      if (i < 0) break
+      const end = s.indexOf('"', i + 1)
+      if (end < 0) break
+      s = s.slice(0, i) + `"/${f}"` + s.slice(end + 1)
+    }
+  }
+  // ② 付け直す
+  for (const f of ASSETS) s = s.replaceAll(`"/${f}"`, `"/${f}?v=${VER}"`)
+  return s
+}
 
 // ---------- HTMLの外枠を差し替える ----------
 function page({ path, title, desc, body, ld, article }) {
@@ -118,6 +150,24 @@ const meta = doc('meta')
 const dates = meta?.dates ?? []
 const today = dates.at(-1) ?? new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10)
 
+// 試し読み（登録なしで見られる毎日1レース）。印は裏側（sync-public）が付けている。
+const tasterCache = new Map()
+const tasterPick = (date) => {
+  if (!tasterCache.has(date)) tasterCache.set(date, doc(`taster/${date}`)?.pick ?? null)
+  return tasterCache.get(date)
+}
+/** そのレースが試し読みなら、予想の一文を返す。違えば null。 */
+function tasterOf(R) {
+  if (!R?.taster) return null
+  const p = tasterPick(R.date)
+  if (!p || p.race_id !== R.race_id) return null
+  // ⚠ 「きょうの」と書かないこと。前日のレースページにも印が付くので、日付と食い違う。
+  return `<p><b>${p.lane === 1 ? '1号艇1着の無料予想' : '無料予想'}</b>（登録なしで見られる、その日の試し読み1レース）：
+    単勝 <b>${p.lane}号艇 ${esc(p.racer ?? '')}</b>${p.win_probability != null ? `・1着確率 ${pct(p.win_probability)}` : ''}${
+      p.hit == null ? '' : p.hit ? `・<b>的中</b>${p.payout ? ` ${p.payout.toLocaleString()}円` : ''}` : '・不的中'}。
+    ほかのレースの無料予想は<a href="/line">LINE登録（無料）</a>でご覧いただけます。</p>`
+}
+
 // トップ・日付ごとの出走表
 for (const d of dates) {
   const j = doc(`races/${d}`)
@@ -125,8 +175,24 @@ for (const d of dates) {
   const byV = new Map()
   for (const r of j.races) { if (!byV.has(r.jcd)) byV.set(r.jcd, []); byV.get(r.jcd).push(r) }
   const isToday = d === today
+  // ★試し読みの1レースは、JavaScriptが動かなくても見えるようにする（2026-10-10）
+  //   検索エンジンとSNSのクローラーが見るのはこのHTMLで、**未登録と同じ立場**。
+  //   以前はここに予想が1文字も無く、クローラーには「鍵のかかった案内」しか見えていなかった。
+  //   taster/<日付> は誰でも読める置き場で、入っているのは1本だけ。
+  const T = doc(`taster/${d}`)
+  const tp = T?.pick ?? null
+  const tasterBox = !tp ? '' : `<section><h2>${tp.lane === 1 ? 'きょうの1号艇1着の無料予想' : 'きょうの無料予想'}
+      <span class="sub">試し読み1レース</span></h2>
+    <p><a href="/race/${esc(tp.race_id)}">${esc(tp.venue ?? VENUES[tp.jcd] ?? '')}${tp.race_no}R</a>
+      ${tp.deadline ? `（締切 ${esc(tp.deadline)}）` : ''}　単勝 <b>${tp.lane}号艇 ${esc(tp.racer ?? '')}</b>
+      ${tp.win_probability != null ? `・1着確率 ${pct(tp.win_probability)}` : ''}
+      ${tp.hit == null ? '' : tp.hit ? `・<b>的中</b>${tp.payout ? ` ${tp.payout.toLocaleString()}円` : ''}` : '・不的中'}</p>
+    <p>登録なしで見られるのは毎日この1レースです。${T.total > 1 ? `きょうは全部で${T.total}本出しています。残りは` : ''}
+      <a href="/line">LINE登録（無料）</a>${T.total > 1 ? 'でご覧いただけます' : 'で毎朝お届けしています'}。
+      買い目は100円換算で、外れたぶんも<a href="/results">実績</a>に残しています。</p></section>`
   const body = `<h1>${isToday ? esc(SITE_NAME) : `${md(d)}の出走表`}</h1>
     <p>${md(d)}は全国${byV.size}場で${j.races.length}レースが行われます。締切時刻・選手の成績・モーター・直前情報と、AIの1着確率をまとめています。</p>
+    ${isToday ? tasterBox : ''}
     ${[...byV].sort((a, b) => a[0] - b[0]).map(([jcd, rs]) => `<section><h2>${esc(VENUES[jcd])}</h2><p>${
       rs.sort((a, b) => a.race_no - b.race_no).map((r) => `<a href="/race/${esc(r.race_id)}">${r.race_no}R ${esc(r.deadline ?? '')}</a>`).join(' ')}</p></section>`).join('')}
     <p><a href="/tenkai">展開予想</a>　<a href="/venues">場情報・攻略</a>　<a href="/racers">選手</a>　<a href="/results">的中実績</a></p>`
@@ -154,6 +220,7 @@ for (const f of readdirSync(LOCAL)) {
     <p>${R.date.replaceAll('-', '/')}・締切 ${esc(R.deadline ?? '―')}${R.title ? `・${esc(R.title)}` : ''}${R.series ? `（${esc(R.series)}）` : ''}</p>
     <table><caption>出走表</caption><thead><tr><th>枠</th><th>選手</th><th>級別</th><th>全国勝率</th><th>2連対率</th><th>3連対率</th><th>モーター</th><th>平均ST</th></tr></thead><tbody>${rows}</tbody></table>
     ${R.result?.order ? `<p>結果：${esc(R.result.order_all ?? R.result.order)}（${esc(R.result.kimarite ?? '')}）　3連単 ${R.result.trifecta_payout?.toLocaleString() ?? '―'}円</p>` : ''}
+    ${tasterOf(R) ?? ''}
     <p><a href="/venue/${R.jcd}">${esc(R.venue)}の攻略</a>　<a href="/d/${esc(R.date)}">${md(R.date)}の出走表</a></p>`
   out(`/race/${R.race_id}`, page({
     path: `/race/${R.race_id}`,
@@ -172,14 +239,45 @@ for (const f of readdirSync(LOCAL)) {
   if (!f.startsWith('racer__')) continue
   const P = JSON.parse(readFileSync(join(LOCAL, f), 'utf8'))?.racer
   if (!P?.name) continue
+  // ★JavaScriptを動かさない相手にも中身を見せる（2026-10-11）
+  //   それまで選手ページのHTMLは**本文261文字**しかなく、題・1行要約・コース別表だけだった。
+  //   画面（app.js）は場別・グレード別・時間帯別・進入・直近の節まで全部出しているのに、
+  //   **クローラーが見るHTMLには入っていなかった**。選手ページは1,627枚＝サイトの76%。
+  //   ・Googleは描き直してくれるが、1,627枚ぶんは後回しにされる
+  //   ・SNSのクローラーとAI系のクローラー（GPTBot等）は**そもそもJavaScriptを動かさない**
+  //     ＝AIに引用されたいなら、ここに書いていないものは存在しないのと同じ
+  //   ・薄いページを大量に置くこと自体が、Googleの「大量生成コンテンツの不正使用」に近づく
+  //   doc に入っているものを出すだけなので、集計も通信も増えない。
   const c1 = (P.by_course ?? []).find((c) => c.course === 1)
+  const S = P.summary_1y, T = P.titles_since_2022, MZ = P.maezuke
+  const statTable = (cap, head, rows) => !rows?.length ? ''
+    : `<table><caption>${cap}</caption><thead><tr><th>${head}</th><th>出走</th><th>1着率</th><th>2連対率</th><th>3連対率</th><th>平均ST</th></tr></thead><tbody>${
+      rows.map((r) => `<tr><td>${r.label}</td><td>${r.starts}</td><td>${pct(r.win_rate)}</td><td>${pct(r.top2_rate)}</td><td>${pct(r.top3_rate)}</td><td>${num(r.avg_st)}</td></tr>`).join('')}</tbody></table>`
+  // 場別は1着率の高い順に並べる（表で見たいのはこれ）。
+  // ⚠ ただし本文で「いちばんよい場」と書いてはいけない。**最大値を同じ標本から選ぶと偏る**ので、
+  //   15走で66.7%のような上振れを「得意な場」と言い切ることになる（2026-10-11に書きかけた）。
+  //   本文で触れるのは**いちばん多く走っている場**（選び方で偏らないし、主戦場のほうが知りたい情報）。
+  const venues = [...(P.by_venue ?? [])].sort((a, b) => b.win_rate - a.win_rate)
+  const mainV = [...(P.by_venue ?? [])].sort((a, b) => b.starts - a.starts)[0]
   const body = `<h1>${esc(P.name)}</h1>
-    <p>登番 ${P.racer_id}${P.branch ? `・${esc(P.branch)}支部` : ''}${P.class ? `・${esc(P.class)}` : ''}${P.age ? `・${P.age}歳` : ''}</p>
-    ${P.summary_1y ? `<p>直近1年：${P.summary_1y.starts}走・1着率 ${pct(P.summary_1y.win_rate)}・2連対率 ${pct(P.summary_1y.top2_rate)}・3連対率 ${pct(P.summary_1y.top3_rate)}・平均ST ${num(P.summary_1y.avg_st)}</p>` : ''}
-    ${c1 ? `<p>1コースでの成績：${c1.starts}走・1着率 ${pct(c1.win_rate)}</p>` : ''}
-    ${(P.by_course ?? []).length ? `<table><caption>コース別成績（直近1年）</caption><thead><tr><th>コース</th><th>出走</th><th>1着率</th><th>2連対率</th><th>3連対率</th></tr></thead><tbody>${
-      P.by_course.map((c) => `<tr><td>${c.course}</td><td>${c.starts}</td><td>${pct(c.win_rate)}</td><td>${pct(c.top2_rate)}</td><td>${pct(c.top3_rate)}</td></tr>`).join('')}</tbody></table>` : ''}
-    <p><a href="/racers">選手一覧</a></p>`
+    <p>登番 ${P.racer_id}${P.branch ? `・${esc(P.branch)}支部` : ''}${P.class ? `・${esc(P.class)}` : ''}${P.age ? `・${P.age}歳` : ''}${P.height ? `・${P.height}cm` : ''}${P.weight ? `・${P.weight}kg` : ''}</p>
+    ${S ? `<p>競艇選手${esc(P.name)}（登番${P.racer_id}）の<strong>直近1年</strong>の成績は、${S.starts}走で1着率 ${pct(S.win_rate)}・2連対率 ${pct(S.top2_rate)}・3連対率 ${pct(S.top3_rate)}、平均STは ${num(S.avg_st)}（レース内の平均順位 ${num(S.avg_st_rank)}番手）です。${
+      c1 ? `1コースに入ったときは${c1.starts}走で1着率 ${pct(c1.win_rate)}。` : ''}${
+      mainV ? `いちばん多く走っているのは${esc(mainV.venue)}で、${mainV.starts}走・1着率 ${pct(mainV.win_rate)}です。` : ''}</p>` : ''}
+    ${T ? `<p>2022年8月以降の実績：優勝 ${T.yusho}回・優出 ${T.yushutsu}回・準優 ${T.junyu}回。</p>` : ''}
+    ${statTable('コース別成績（直近1年）', 'コース', (P.by_course ?? []).map((c) => ({ ...c, label: `${c.course}コース` })))}
+    ${statTable('場別成績（直近1年・1着率の高い順）', '場', venues.map((v) => ({ ...v, label: v.venue })))}
+    ${statTable('グレード別（直近1年）', 'グレード', (P.by_grade ?? []).map((g) => ({ ...g, label: g.grade })))}
+    ${statTable('時間帯・波の高さ別（直近1年）', '条件', [...(P.by_time ?? []), ...(P.by_wave ?? [])].map((g) => ({ ...g, label: g.band })))}
+    ${MZ?.starts ? `<p>進入：${MZ.starts}走のうち、枠より内へ入った（前づけ）のが ${MZ.inward}回（${pct(MZ.inward_rate)}）、外へ出たのが ${MZ.outward}回（${pct(MZ.outward_rate)}）。</p>` : ''}
+    ${(P.winning_moves ?? []).length ? `<p>1着になったときの決まり手：${P.winning_moves.map((w) => `${esc(w.kimarite)} ${w.count}回（${pct(w.share)}）`).join('・')}。</p>` : ''}
+    ${(P.periods ?? []).length ? `<table><caption>期別の公式成績</caption><thead><tr><th>期</th><th>級別</th><th>勝率</th><th>2連対率</th><th>出走</th></tr></thead><tbody>${
+      P.periods.map((q) => `<tr><td>${esc(q.period)}</td><td>${esc(q.class ?? '')}</td><td>${num(q.win_rate)}</td><td>${pct(q.top2_rate)}</td><td>${q.starts}</td></tr>`).join('')}</tbody></table>` : ''}
+    ${(P.series_recent ?? []).length ? `<table><caption>直近の節</caption><thead><tr><th>期間</th><th>場</th><th>グレード</th></tr></thead><tbody>${
+      P.series_recent.map((s) => `<tr><td>${esc(s.from)}〜${esc(s.to)}</td><td>${esc(s.venue)}</td><td>${esc(s.grade ?? '')}${s.series ? `　${esc(s.series)}` : ''}</td></tr>`).join('')}</tbody></table>` : ''}
+    ${P.period_note ? `<p>${esc(P.period_note)}</p>` : ''}
+    <p><a href="/racers">選手一覧</a>${P.branch ? `　<a href="/racers/all">支部別の選手一覧</a>` : ''}${
+      mainV ? `　<a href="/venue/${mainV.jcd}">${esc(mainV.venue)}のデータ攻略</a>` : ''}</p>`
   out(`/racer/${P.racer_id}`, page({
     path: `/racer/${P.racer_id}`,
     title: `${P.name}（${P.racer_id}）の成績データ`,
@@ -195,15 +293,34 @@ for (let jcd = 1; jcd <= 24; jcd++) {
   const G = doc(`guide/${jcd}`), V = doc(`venue/${jcd}`)?.venue
   if (!G && !V) continue
   const name = G?.venue ?? V?.venue ?? VENUES[jcd]
+  // ★きょうの開催もここに出す（2026-10-11・app.js の venue() と同じ中身）
+  //   「桐生 競艇」で来た人がいちばん先に知りたいのは**きょう何が走るか**。
+  //   ⚠ app.js に節を足したら、ここにも足すこと。画面では気づけない
+  //     （画面は常に正しく見える。クローラーが見るのはこちら）。
+  const mine = (doc(`races/${today}`)?.races ?? []).filter((r) => r.jcd === jcd)
+    .sort((a, b) => a.race_no - b.race_no)
+  const head = mine[0]
+  const todayBox = !mine.length ? ''
+    : `<h2>きょうの${esc(name)}（${md(today)}）</h2>
+      <p>${esc(head.series ?? '')}${head.grade ? `（${esc(head.grade)}）` : ''}${
+        head.day_no ? `　${head.day_no}日目${head.series_days ? `/全${head.series_days}日` : ''}` : ''}・全${mine.length}レース</p>
+      <table><caption>きょうの出走と結果</caption><thead><tr><th>R</th><th>締切</th><th>状況</th><th>着順</th><th>決まり手</th><th>3連単</th></tr></thead><tbody>${
+        mine.map((r) => `<tr><td><a href="/race/${esc(r.race_id)}">${r.race_no}R</a></td><td>${esc(r.deadline ?? '―')}</td>
+          <td>${r.cancelled ? '中止' : r.result ? '確定' : r.closed ? '締切' : '受付中'}</td>
+          <td>${esc(r.result?.order_all ?? '―')}</td><td>${esc(r.result?.kimarite ?? '―')}</td>
+          <td>${r.result?.trifecta_payout ? r.result.trifecta_payout.toLocaleString() + '円' : '―'}</td></tr>`).join('')}</tbody></table>`
   const body = `<h1>${esc(name)}の攻略</h1>
+    ${todayBox}
     ${G?.points?.length ? `<ul>${G.points.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>` : ''}
     ${G?.points_note ? `<p>${esc(G.points_note)}</p>` : ''}
     ${G?.manual?.html ?? ''}
-    <p><a href="/venues">ほかの場を見る</a></p>`
+    <p><a href="/venues">ほかの場を見る</a>　<a href="/schedule">開催予定</a></p>`
   out(`/venue/${jcd}`, page({
     path: `/venue/${jcd}`,
     title: `ボートレース${name}の攻略とデータ`,
-    desc: `ボートレース${name}の1コース1着率・コース別の決まり手・波や風での変わり方・当地で強い選手を、直近1年の実測からまとめた攻略ページです。`,
+    desc: mine.length
+      ? `きょう（${md(today)}）のボートレース${name}は${mine.length}レース${head?.series ? `「${head.series}」` : ''}。締切時刻と結果、1コース1着率・決まり手・波や風での変わり方・当地で強い選手を実測からまとめています。`
+      : `ボートレース${name}の1コース1着率・コース別の決まり手・波や風での変わり方・当地で強い選手を、直近1年の実測からまとめた攻略ページです。`,
     body,
   }))
 }
@@ -249,32 +366,159 @@ const listPages = [
   ['/racers/all', '競艇選手 全一覧', '直近180日に出走した競艇選手を、支部ごと・五十音順に並べています。'],
   ['/schedule', 'ボートレース開催予定', '全国24場の開催予定と、SG・G1・G2・G3のグレードレースの日程・出場予定選手をまとめています。'],
   ['/results', '的中実績', '過去30日の的中率と回収率です。締切前に出した予想だけを、外れた日も含めて集計しています。'],
-  ['/member', '会員（月額500円）', '月額500円の会員になると、全レースの展開予想とAI予想（3連複4点＋3連単4点）、各レースの1着確率がご覧いただけます。'],
+  ['/member', '会員（月額500円）', '月額500円の会員になると、全レースの展開予想（展開の図つき）と、レースごとに選べるAI予想の型（本命・堅実・中穴・大穴）、各レースの1着確率がご覧いただけます。'],
   ['/alerts', '展示のアラート｜まくり・前づけ・チルト・スタート', '展示タイム・進入・チルト・展示STから、荒れそうなレースを機械的に拾っています。効き目を228,685レースで実測した結果もそのまま載せています。'],
   ['/line', 'LINEで無料予想を受け取る', 'ボートレース研究所の無料予想（単勝1点・1着確率80%以上の本命だけ）を、LINEで毎朝10時にお届けします。費用はかかりません。'],
-  ['/analysis/average', 'コース別平均｜競艇データ分析', '競艇のコース別平均。全国24場の直近1年の実測データから集計しています。'],
-  ['/analysis/ranking', 'コース別ランキング｜競艇データ分析', '競艇のコース別ランキング。全国24場の直近1年の実測データから集計しています。'],
-  ['/analysis/demoku', '出目分析｜競艇データ分析', '競艇の出目分析。全国24場の直近1年の実測データから集計しています。'],
-  ['/analysis/yusho', '優勝戦｜競艇データ分析', '競艇の優勝戦。全国24場の直近1年の実測データから集計しています。'],
 ]
-for (const [path, title, desc] of listPages)
-  out(path, page({ path, title, desc, body: `<h1>${esc(title.split('｜')[0])}</h1><p>${esc(desc)}</p>` }))
+// ★/news だけは記事一覧を本文に入れる（2026-11-13）。
+//   ここは長らく**題と説明だけ**で、記事へのリンクが1本も無かった。
+//   記事そのもの（/news/<slug>）は上で書き出していてサイトマップにも載るが、
+//   一覧から辿れないので、クローラーから見ると行き止まりだった。
+//   11/01 に実測して 0本、11/13 の公開後も 0本のまま。
+//   記事は doc('news/index') に入っている。出すだけでいい。
+//   選手ページ・データ分析と同じ穴（[[boatrace-racer-pages-thin]]）。
+const newsListHtml = () => {
+  if (!news.length) return ''
+  const byYm = new Map()
+  for (const n of news) {
+    const ym = String(n.date ?? '').slice(0, 7) || 'そのほか'
+    if (!byYm.has(ym)) byYm.set(ym, [])
+    byYm.get(ym).push(n)
+  }
+  return [...byYm.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([ym, list]) =>
+    `<section><h2>${esc(ym === 'そのほか' ? ym : ym.replace('-', '年') + '月')}</h2><ul>${
+      list.map((n) => `<li><a href="/news/${esc(n.slug)}">${esc(n.title ?? n.slug)}</a>${
+        n.date ? `　<time datetime="${esc(n.date)}">${esc(n.date)}</time>` : ''}${
+        n.summary ? `<br>${esc(String(n.summary).slice(0, 110))}` : ''}</li>`).join('')
+    }</ul></section>`).join('')
+}
+for (const [path, title, desc] of listPages) {
+  const extra = path === '/news' ? newsListHtml() : ''
+  out(path, page({ path, title, desc, body: `<h1>${esc(title.split('｜')[0])}</h1><p>${esc(desc)}</p>${extra}` }))
+}
+
+// ---------- データ分析（2026-10-11に中身を入れた）----------
+// ★それまで本文が42文字（題と一文だけ）しか無かった。
+//   画面（app.js）は24場ぶんの表を出しているのに、クローラーには空っぽ同然だった。
+//   選手ページと同じ穴（[[boatrace-racer-pages-thin]]）。doc に入っているものを出すだけ。
+// ★ここは**場をまたいで比べられる唯一のページ**でもある。
+//   「1コースが強い場は」「荒れる場は」という問いに答えるので、場ページ24枚の親になる。
+{
+  const vlink = (jcd, name) => `<a href="/venue/${jcd}">${esc(name)}</a>`
+  // コース別平均
+  const A = doc('analysis/average')
+  if (A?.national?.length) {
+    const v1 = (A.venues ?? []).map((v) => ({ ...v, c1: v.courses?.find((c) => c.course === 1) }))
+      .filter((v) => v.c1).sort((a, b) => b.c1.win_rate - a.c1.win_rate)
+    out('/analysis/average', page({
+      path: '/analysis/average', title: 'コース別平均｜競艇データ分析',
+      desc: `競艇のコース別1着率を全国24場の直近1年（${A.period?.from}〜）の実測から集計。1コースの1着率は全国平均${num(A.national[0]?.win_rate, 1)}%で、場によって${num(v1.at(-1)?.c1.win_rate, 1)}%〜${num(v1[0]?.c1.win_rate, 1)}%の開きがあります。`,
+      body: `<h1>コース別平均</h1>
+        <p>全国24場の直近1年（${esc(A.period?.from ?? '')}〜${esc(A.period?.to ?? '')}）の実測です。コースは進入コース（枠番ではありません）。</p>
+        <table><caption>全国平均（コース別）</caption><thead><tr><th>コース</th><th>出走</th><th>1着率</th><th>2連対率</th><th>3連対率</th><th>平均ST</th></tr></thead><tbody>${
+          A.national.map((c) => `<tr><td>${c.course}コース</td><td>${c.starts?.toLocaleString()}</td><td>${pct(c.win_rate)}</td><td>${pct(c.top2_rate)}</td><td>${pct(c.top3_rate)}</td><td>${num(c.avg_st)}</td></tr>`).join('')}</tbody></table>
+        <h2>1コースが強い場・弱い場</h2>
+        <table><caption>場別の1コース1着率（高い順）</caption><thead><tr><th>場</th><th>1コース1着率</th><th>2連対率</th><th>出走</th></tr></thead><tbody>${
+          v1.map((v) => `<tr><td>${vlink(v.jcd, v.venue)}</td><td>${pct(v.c1.win_rate)}</td><td>${pct(v.c1.top2_rate)}</td><td>${v.c1.starts?.toLocaleString()}</td></tr>`).join('')}</tbody></table>
+        <p>いちばん高いのは${vlink(v1[0].jcd, v1[0].venue)}の${pct(v1[0].c1.win_rate)}、いちばん低いのは${vlink(v1.at(-1).jcd, v1.at(-1).venue)}の${pct(v1.at(-1).c1.win_rate)}です。各場の詳しい事情は<a href="/venues">場ごとのページ</a>にまとめています。</p>`,
+    }))
+  }
+  // 出目
+  const D = doc('analysis/demoku')
+  if (D?.national) {
+    const vs = [...(D.venues ?? [])].sort((a, b) => (b.over_10000_rate ?? 0) - (a.over_10000_rate ?? 0))
+    out('/analysis/demoku', page({
+      path: '/analysis/demoku', title: '出目分析｜競艇データ分析',
+      desc: `3連単の出目の出やすさと配当の水準を、直近1年${D.national.races?.toLocaleString()}レースの実測から集計。いちばん多い出目は${D.national.trifecta_top?.[0]?.combo}（${D.national.trifecta_top?.[0]?.rate}%）、万舟率は全国${num(D.national.over_10000_rate, 1)}%です。`,
+      body: `<h1>出目分析</h1>
+        <p>直近1年・${D.national.races?.toLocaleString()}レースの実測です。3連単の平均配当は${D.national.avg_payout?.toLocaleString()}円、万舟（1万円以上）の率は${pct(D.national.over_10000_rate)}。</p>
+        <table><caption>よく出る3連単の出目（全国）</caption><thead><tr><th>出目</th><th>回数</th><th>割合</th></tr></thead><tbody>${
+          (D.national.trifecta_top ?? []).slice(0, 20).map((t) => `<tr><td>${esc(t.combo)}</td><td>${t.count?.toLocaleString()}</td><td>${pct(t.rate)}</td></tr>`).join('')}</tbody></table>
+        <h2>荒れる場・堅い場</h2>
+        <table><caption>場別の万舟率（高い順）</caption><thead><tr><th>場</th><th>万舟率</th><th>3連単の平均配当</th><th>レース</th></tr></thead><tbody>${
+          vs.map((v) => `<tr><td>${vlink(v.jcd, v.venue)}</td><td>${pct(v.over_10000_rate)}</td><td>${v.avg_payout?.toLocaleString()}円</td><td>${v.races?.toLocaleString()}</td></tr>`).join('')}</tbody></table>
+        <p>⚠ 平均配当が高いことは「儲かる」という意味ではありません。控除率25%はどの場でも同じで、荒れる場は当たる回数が減ります（<a href="/news/2026-10-10-kojoritsu">控除率25%とは何か</a>）。</p>`,
+    }))
+  }
+  // コース別の上位選手
+  const R = doc('analysis/ranking')
+  if (R?.by_course?.length) {
+    out('/analysis/ranking', page({
+      path: '/analysis/ranking', title: 'コース別ランキング｜競艇データ分析',
+      desc: `コースごとに1着率の高い選手と、平均STの速い選手を直近1年の実測から並べています（${esc(R.rule ?? '')}）。`,
+      body: `<h1>コース別ランキング</h1><p>${esc(R.rule ?? '')}の実測です。</p>
+        ${R.by_course.map((c) => `<h2>${c.course}コース</h2>
+          <table><thead><tr><th>選手</th><th>級別</th><th>出走</th><th>1着率</th><th>平均ST</th></tr></thead><tbody>${
+            (c.top ?? []).slice(0, 10).map((r) => `<tr><td><a href="/racer/${r.racer_id}">${esc(r.name)}</a></td><td>${esc(r.class ?? '')}</td><td>${r.starts}</td><td>${pct(r.win_rate)}</td><td>${num(r.avg_st)}</td></tr>`).join('')}</tbody></table>`).join('')}
+        <h2>平均STの速い選手</h2>
+        <table><thead><tr><th>選手</th><th>級別</th><th>出走</th><th>平均ST</th></tr></thead><tbody>${
+          (R.fastest_start ?? []).slice(0, 30).map((r) => `<tr><td><a href="/racer/${r.racer_id}">${esc(r.name)}</a></td><td>${esc(r.class ?? '')}</td><td>${r.starts}</td><td>${num(r.avg_st)}</td></tr>`).join('')}</tbody></table>`,
+    }))
+  }
+  // 優勝戦
+  const Y = doc('analysis/yusho')
+  if (Y?.races?.length) {
+    const row = (r) => `<tr><td>${esc(r.date)}</td><td>${vlink(r.jcd, r.venue)}</td><td>${esc(r.grade ?? '')}</td><td>${esc(r.series ?? '')}</td><td>${esc(r.winner?.name ?? '')}</td><td>${esc(r.kimarite ?? '')}</td><td>${esc(r.order ?? '')}</td><td>${r.trifecta_payout?.toLocaleString() ?? '―'}円</td></tr>`
+    out('/analysis/yusho', page({
+      path: '/analysis/yusho', title: '優勝戦｜競艇データ分析',
+      desc: `${esc(Y.period ?? '直近90日')}の優勝戦${Y.races.length}本の結果。優勝者・決まり手・着順・3連単の配当を一覧にしています。`,
+      body: `<h1>優勝戦</h1><p>${esc(Y.period ?? '直近90日')}の優勝戦${Y.races.length}本です。</p>
+        ${(Y.big ?? []).length ? `<h2>グレードレースの優勝戦</h2><table><thead><tr><th>日付</th><th>場</th><th>格</th><th>開催</th><th>優勝</th><th>決まり手</th><th>着順</th><th>3連単</th></tr></thead><tbody>${Y.big.map(row).join('')}</tbody></table>` : ''}
+        <h2>すべての優勝戦</h2><table><thead><tr><th>日付</th><th>場</th><th>格</th><th>開催</th><th>優勝</th><th>決まり手</th><th>着順</th><th>3連単</th></tr></thead><tbody>${
+          Y.races.slice(0, 120).map(row).join('')}</tbody></table>`,
+    }))
+  }
+}
+
+// ---------- 節（開催）----------
+// ★2026-10-11まで、/meeting/<場>/<開始日> は **103本すべてサイトマップに載っているのに
+//   HTMLが1枚も無かった**。実在しないので Pages が index.html を返し、
+//   **103本すべてがトップページの複製（canonical も「/」）**になっていた。
+//   出場選手一覧という中身はあるので、ちゃんと書き出す。
+for (const f of readdirSync(LOCAL)) {
+  if (!f.startsWith('meeting__')) continue
+  const M = JSON.parse(readFileSync(join(LOCAL, f), 'utf8'))?.meeting
+  if (!M?.venue || !M.start_date) continue
+  const path = `/meeting/${M.jcd}/${M.start_date}`
+  const rs = (M.racers ?? []).slice().sort((a, b) => (b.win_rate ?? 0) - (a.win_rate ?? 0))
+  const span = `${esc(M.start_date)}〜${esc(M.end_date ?? '')}`
+  out(path, page({
+    path,
+    title: `${M.venue}「${M.title ?? ''}」${md(M.start_date)}開幕`,
+    desc: `ボートレース${M.venue}「${M.title ?? ''}」（${M.grade ?? ''}・${M.start_date}〜${M.end_date ?? ''}・${M.days ?? ''}日間）の出場予定選手${rs.length}人を勝率順にまとめています。`,
+    body: `<h1>${esc(M.venue)}「${esc(M.title ?? '')}」</h1>
+      <p>${span}（${M.days ?? '―'}日間）${M.grade ? `・${esc(M.grade)}` : ''}・ボートレース${esc(M.venue)}</p>
+      ${rs.length ? `<table><caption>出場予定選手（勝率の高い順・${rs.length}人）</caption><thead><tr><th>選手</th><th>級別</th><th>支部</th><th>勝率</th></tr></thead><tbody>${
+        rs.map((r) => `<tr><td><a href="/racer/${r.racer_id}">${esc(r.name)}</a></td><td>${esc(r.class ?? '')}</td><td>${esc(r.branch ?? '')}</td><td>${num(r.win_rate)}</td></tr>`).join('')}</tbody></table>` : ''}
+      <p><a href="/venue/${M.jcd}">${esc(M.venue)}のデータ攻略</a>　<a href="/schedule">開催予定</a></p>`,
+    ld: { '@context': 'https://schema.org', '@type': 'SportsEvent', name: `${M.venue} ${M.title ?? ''}`,
+      startDate: M.start_date, endDate: M.end_date ?? undefined, sport: '競艇',
+      location: { '@type': 'Place', name: `ボートレース${M.venue}` } },
+  }))
+}
 
 // ---------- 古いHTMLを片づける ----------
 // レースは3日で消えるので、置きっぱなしにすると「データの無いページ」が検索に残る
 let removed = 0
+// ⚠ フォルダを問答無用で消してはいけない（2026-10-11に踏んだ）
+//   もとは「前の作り（<パス>/index.html）の残り」を片づけるつもりで
+//   **フォルダを見つけたら中身ごと削除**していた。
+//   ところが節ページは /meeting/<場>/<開始日> と入れ子なので、
+//   `sweep('meeting')` が meeting/1/ などを**作った直後に消していた**
+//   （書き出し2,184枚と報告されるのに、実際に残るのは2,053枚だった）。
+//   → 入れ子はたどって、**この回に書かなかったHTMLだけ**を消す。
+//     空になったフォルダと古い index.html は、下の purge() が片づける。
 const sweep = (dir) => {
   const abs = join(SITE, dir)
   if (!existsSync(abs)) return
   for (const name of readdirSync(abs)) {
     const p = join(abs, name)
-    // 前の作り（<パス>/index.html）で残ったフォルダは、まるごと片づける
-    if (statSync(p).isDirectory()) { rmSync(p, { recursive: true, force: true }); removed++; continue }
+    if (statSync(p).isDirectory()) { sweep(`${dir}/${name}`); continue }
     if (!name.endsWith('.html')) continue
     if (!wrote.has(`${dir}/${name}`)) { rmSync(p, { force: true }); removed++ }
   }
 }
-for (const d of ['race', 'racer', 'd', 'news', 'venue', 'analysis', 'racers']) sweep(d)
+for (const d of ['race', 'racer', 'd', 'news', 'venue', 'analysis', 'racers', 'meeting']) sweep(d)
 
 // 前の作り（<パス>/index.html）の残りを全部消す。
 // いまは site/index.html だけが index.html で、ほかは <パス>.html。

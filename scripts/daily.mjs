@@ -6,6 +6,7 @@
 //
 // 監査でFAILが出たら終了コード1。**その日は予想を出さないこと。**
 
+import './prio.mjs'   // 予定タスク経由だと BelowNormal になる。自分で上げる
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'

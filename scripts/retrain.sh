@@ -1,7 +1,14 @@
 #!/bin/bash
-# モデルを最新データで学習し直す（毎日・night2.sh の最後に呼ぶ）。
+# モデルを最新データで学習し直す。
 #
 #   bash scripts/retrain.sh
+#
+# ★呼ばれ方（2026-10-20に変更）
+#   以前は night2.sh の 9/9（最後）から呼ばれていたが、1〜8 の途中で死ぬと
+#   ここまで届かず再学習が丸ごと飛んだ（10/18〜10/20で3日連続）。
+#   いまはタスク boatrace-retrain から：
+#     auto-retrain.bat → ensure-retrain.sh → retrain-needed.mjs で可否判断 → ここ
+#   03:30 から30分ごと・09:00 まで。済んでいれば回さないので無駄打ちしない。
 #   node scripts/retrain-gate.mjs --history     これまでの記録
 #
 # ★なぜ要るか（2026-09-14）
@@ -25,6 +32,18 @@ export PATH="/c/Program Files/nodejs:$PATH"
 cd "/c/Users/sames/Desktop/競艇予想"
 
 read L CALIB_FROM CALIB_TO < <(node scripts/retrain-gate.mjs --dates)
+
+# ⚠ 日付が取れたことを必ず確かめる（2026-10-20に踏んだ）。
+#   retrain-gate.mjs は読むだけでも CREATE TABLE IF NOT EXISTS で書き込みロックを要求し、
+#   昼間は auto-bet などとぶつかって待たされる（busy_timeout は5分）。
+#   そこで落ちる・止められると read は**空のまま成功扱い**になり、
+#   `model5.mjs --train-to "" --calib-to ""` が起動して10分と4GBを無駄にする。
+#   空なら何もせず降りる。次の回（30分後）にやり直せばよい。
+if [ -z "${L:-}" ] || [ -z "${CALIB_FROM:-}" ] || [ -z "${CALIB_TO:-}" ]; then
+  echo "日付が取れませんでした（DBが混んでいる可能性）。今回は何もしません"
+  exit 0
+fi
+
 echo "=== 再学習  結果は${L}まで ／ 学習〜${CALIB_FROM} ／ 判定用に残す ${CALIB_FROM}〜${L} ==="
 
 rm -f data/model5.new.json data/model5-full.new.json

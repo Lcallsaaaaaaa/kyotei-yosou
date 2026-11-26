@@ -18,6 +18,7 @@
 //   締切前の各時点でオッズを記録し、確定オッズと突き合わせる。
 //   「締切20分前に買えるオッズ」で回収率を計算し直せば、実運用の数字になる。
 
+import './prio.mjs'   // 予定タスク経由だと BelowNormal になる。自分で上げる
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -123,6 +124,7 @@ const minsTo = (hhmm) => {
 console.log('締切60分前から5分おきに記録します（Ctrl+Cで終了）\n')
 const WATCH_FROM = Number(flag('from-mins', 20))
 const done = new Set()
+let fails = 0   // ★記録に失敗した連続回数。続くようなら自分から落ちる
 // ★生存記録（auto-bet と同じ理由。status.mjs がこの更新時刻を見る）
 const beat = () => { try { writeFileSync(join(ROOT, 'logs', 'hb-odds-live.txt'), new Date().toISOString()) } catch {} }
 try { mkdirSync(join(ROOT, 'logs'), { recursive: true }) } catch {}
@@ -149,7 +151,10 @@ for (;;) {
       const stamp = new Date().toTimeString().slice(0, 8)
       const tan6 = [...Array(6)].map((_, i) => Number(v[i]))
       const H = snapshotOk(tan6)
-      db.exec('BEGIN')
+      // ★遅延BEGINは使わない（2026-10-31）。
+      //   読み→書きへ昇格するとき busy_timeout を無視して即 SQLITE_BUSY を返す。
+      //   常駐5本がDBを触っている昼間は、最初から書き込みロックを取る。
+      db.exec('BEGIN IMMEDIATE')
       for (let i = 0; i < 6; i++) {
         const o = tan6[i]
         // 後半6つは複勝の「下限-上限」（例 "1.4-2.2"）。下限だけ取る。
@@ -165,7 +170,24 @@ for (;;) {
       console.log(`  ${new Date().toTimeString().slice(0, 5)}  ${t.race_id}  締切${mb}分前  ` +
         `${H.ok ? '' : '⚠使えない '}単勝[${v.slice(0, 6).join(' ')}]  複勝[${v.slice(6, 12).join(' ')}]` +
         `${H.sum != null ? `  控除${H.sum.toFixed(3)}` : ''}`)
-    } catch {}
+      fails = 0
+    } catch (e) {
+      // ★BEGIN したまま例外で抜けると、次の周回の BEGIN が
+      //   「transaction within a transaction」で必ず落ちる。そこから先は
+      //   **永久に1件も記録できない**のに、鼓動は打ち続けるので誰も気づかない。
+      //   2026-10-31、11:37〜13:45 の2時間ぶんの締切前オッズが丸ごと欠けた。
+      //   締切前オッズはその瞬間にしか取れないので、欠けたぶんは取り返せない。
+      try { db.exec('ROLLBACK') } catch { }
+      fails++
+      console.log(`  ⚠ ${t.race_id} 締切${mb}分前 記録できず（${fails}回目）: ${e.message}`)
+      // ★黙って動き続けるより、落ちて立て直してもらうほうがいい。
+      //   見張り（watchdog.ps1）が30分以内に立て直す。
+      if (fails >= 15) {
+        console.log('\n★ 記録できない回が続いたので終了します。見張りが立て直します。')
+        try { db.close() } catch { }
+        process.exit(1)
+      }
+    }
     await sleep(400)
   }
   beat()

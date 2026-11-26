@@ -13,6 +13,7 @@
 //   PCと同じWi-Fiにいるスマホから http://<PCのIP>:3940 で開ける。
 //   **認証は無い。**LAN内に置く前提。外に出すなら必ず認証をかけること。
 
+import './prio.mjs'   // 予定タスク経由だと BelowNormal になる。自分で上げる
 import { createServer } from 'node:http'
 import { networkInterfaces } from 'node:os'
 import { join, dirname } from 'node:path'
@@ -709,12 +710,15 @@ ${site}/?k=${free.cur}
       `<div class="lbl">${ja(cur)}（今月・いま貼るもの）</div>${copy(site + '/?k=' + free.cur)}
        <div class="lbl">${ja(nxt)}（来月・月初に貼り替える）</div>${copy(site + '/?k=' + free.nxt)}`,
       `月初の7日間は先月の鍵も通ります。${day <= 7 ? '<b>いまは猶予期間です。まだ貼り替えていなければ今月のものに。</b>' : ''}`) : '') +
+    (free ? box('LINEリッチメニューの「注意アラート」',
+      `<div class="lbl">${ja(cur)}（今月・いま貼るもの）</div>${copy(site + '/alerts?k=' + free.cur)}
+       <div class="lbl">${ja(nxt)}（来月・月初に貼り替える）</div>${copy(site + '/alerts?k=' + free.nxt)}`,
+      'アラートの中身も友だち限定にしました（2026-10-06）。鍵が無いと件数だけの画面になります') : '') +
     (free ? box('毎朝10時の配信文（そのまま貼れます）',
       `<pre>${esc(pushText)}</pre>${copy(site + '/?k=' + free.cur)}`) : '') +
     box('鍵が要らないボタン',
       `<div class="lbl">データ分析</div>${copy(site + '/analysis')}
        <div class="lbl">ニュース</div>${copy(site + '/news')}
-       <div class="lbl">注意アラート</div>${copy(site + '/alerts')}
        <div class="lbl">有料会員登録</div>${copy(site + '/member')}`) +
     `<script>
 document.addEventListener('click',(e)=>{const b=e.target.closest('button[data-v]');if(!b)return;

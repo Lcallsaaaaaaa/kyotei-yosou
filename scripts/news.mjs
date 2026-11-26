@@ -9,6 +9,7 @@
 //   ・同じ記事を二度作らない（ファイル名が同じなら上書き＝同じ内容になるだけ）。
 //   ・予想の実績は外れも含めてそのまま書く。有料の買い目（2点プランの組番）は書かない。
 //   ・人やGPTが書いた記事も content/news/ に置けば一緒に並ぶ（ファイル名は auto- 以外で）。
+import './prio.mjs'   // 予定タスク経由だと BelowNormal になる。自分で上げる
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { writeFileSync, mkdirSync, existsSync } from 'node:fs'

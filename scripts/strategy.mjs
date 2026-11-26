@@ -300,6 +300,19 @@ export async function runPredict(root, date, maxAgeMin = 20) {
   const hit = read()
   if (hit) { console.error(`（${hit.age.toFixed(0)}分前の予想を再利用）`); return hit.j }
 
+  // ★作り直す前に、いまの中身を控える（2026-10-06）
+  //   このキャッシュは **サイトが出す1着確率・2連対率・展開予想の元**でもある
+  //   （chokuzen.mjs の説明を参照）。ここで丸ごと作り直すと、
+  //   **終わったレースの確率が、あとから作った数字に差し替わる**。
+  //   作り直しの特徴量には、その日の前のレースの結果が入っているので、
+  //   実測で確率が最大0.24ずれていた（9/06〜9/21・tansho_daily と突き合わせ）。
+  //   → 締切を過ぎたレースは、下で元の値に戻す。
+  let keep = null
+  try {
+    const old = JSON.parse(fs.readFileSync(cache, 'utf8'))
+    if (old?.races?.length) keep = new Map(old.races.map((r) => [r.race_id, r]))
+  } catch { /* 初回は無い */ }
+
   // ★同時に2つ計算させない
   //   8/23に auto-bet と画面の「予想」ボタンが同時に走り、CPUを取り合って
   //   計算が7分以上かかった。その間に常滑2Rの判定時刻を過ぎた。
@@ -346,6 +359,59 @@ export async function runPredict(root, date, maxAgeMin = 20) {
   }
   // cache は predict.mjs が --out で直接書いている
   try { fs.unlinkSync(lock) } catch {}
+
+  // ★締切を過ぎたレースは、作り直す前の値に戻す（2026-10-06）
+  //   「予想していた数字」と「あとから作った数字」を混ぜない。
+  //   締切が分からないレースは触らない（新しい値のまま）。
+  if (keep) {
+    try {
+      const { DatabaseSync } = await import('node:sqlite')
+      const db = new DatabaseSync(`${root}/data/boatrace.db`, { readOnly: true })
+      db.exec('PRAGMA busy_timeout = 10000')
+      const dl = new Map()
+      for (const r of db.prepare('SELECT race_id, deadline FROM races WHERE date=?').all(date))
+        if (r.deadline) dl.set(r.race_id, r.deadline)
+      try {
+        for (const r of db.prepare('SELECT race_id, deadline FROM race_meta WHERE date=? AND deadline IS NOT NULL').all(date))
+          if (!dl.get(r.race_id)) dl.set(r.race_id, r.deadline)
+      } catch { /* race_meta がまだ無い */ }
+      db.close()
+      const p2 = (n) => String(n).padStart(2, '0')
+      const nw = new Date()
+      const hhmm = `${p2(nw.getHours())}:${p2(nw.getMinutes())}`
+      let back = 0
+      j.races = j.races.map((r) => {
+        const d = dl.get(r.race_id)
+        if (!d || d > hhmm) return r             // 締切前、または締切不明はそのまま
+        const o = keep.get(r.race_id)
+        if (!o) return r
+        back++
+        return o
+      })
+      if (back) {
+        // ⚠ 一時ファイル名にPIDを入れること（2026-10-28）。
+        //   ここと chokuzen.mjs が**同じ固定名 `<予想ファイル>.tmp`** を使っていた。
+        //   chokuzen は5分ごと、こちらは常駐の auto-bet から一日中呼ばれるので、
+        //   2本が同じ一時ファイルを掴み、**新しい内容の後ろに古い内容の尻尾が残って**
+        //   予想ファイルが壊れた。展開予想APIがそれを読むため、
+        //   10/28は**有料会員の中身がまるごと出なくなった**。
+        const tmp = `${cache}.${process.pid}.tmp`
+        fs.writeFileSync(tmp, JSON.stringify(j))
+        // 置き換える前に読めるJSONか確かめる。壊れたものを本番へ出さない。
+        try { JSON.parse(fs.readFileSync(tmp, 'utf8')) }
+        catch (e) {
+          try { fs.unlinkSync(tmp) } catch { /* 残っても害は無い */ }
+          console.error(`（書き出したものが壊れていたので差し替えません: ${String(e.message).slice(0, 50)}）`)
+          return j
+        }
+        fs.renameSync(tmp, cache)
+        console.error(`（締切を過ぎた ${back}レースは元の予想に戻しました）`)
+      }
+    } catch (e) {
+      // 戻せなくても買い目は作れる。ここで止めない
+      console.error(`（終わったレースの差し戻しに失敗: ${e.message}）`)
+    }
+  }
   return j
 }
 

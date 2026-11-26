@@ -30,7 +30,7 @@ import * as S from './strategy.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const argv = process.argv.slice(2)
-const DATE = argv[argv.indexOf('--date') + 1] ?? new Date().toISOString().slice(0, 10)
+const DATE = argv[argv.indexOf('--date') + 1] ?? new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10)
 const YMD = DATE.replaceAll('-', '')
 
 const db = new DatabaseSync(join(ROOT, 'data', 'boatrace.db'))

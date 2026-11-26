@@ -8,11 +8,20 @@
 //   チルト角と部品交換は「その節で機力をどう調整したか」を示す。
 //   番組表のモーター2連率は前使用者を含む累計なので、当節の調整意図は分からない。
 
+import './prio.mjs'   // 予定タスク経由だと BelowNormal になる。自分で上げる
+import { writeFileSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
+// ★生存記録。見張り（watchdog.ps1）はこのファイルの更新時刻で
+//   「居るのに何もしていない」常駐を見分ける。
+//   2026-10-31までは odds-live と auto-bet だけが打っていて、
+//   直前情報だけ誰も見ていなかった。
+try { mkdirSync(join(ROOT, 'logs'), { recursive: true }) } catch { }
+const beat = () => { try { writeFileSync(join(ROOT, 'logs', 'hb-before.txt'), new Date().toISOString()) } catch { } }
+beat()
 const db = new DatabaseSync(join(ROOT, 'data', 'boatrace.db'))
 db.exec('PRAGMA busy_timeout = 180000')
 const all = (s, ...p) => db.prepare(s).all(...p)
@@ -277,6 +286,7 @@ if (LIVE) {
   console.log(`=== 直前情報（当日モード）${DAY}　すでに揃っている ${done.size}レース ===`)
   let got = 0
   for (;;) {
+    beat()   // ★長く寝る分岐が複数あるので、周回の頭で必ず打つ
     if (!FIXED && jst().toISOString().slice(0, 10) !== DAY) {
       DAY = jst().toISOString().slice(0, 10); last.clear(); done.clear(); snaps.clear()
       console.log(`=== 日付が変わった → ${DAY} ===`)

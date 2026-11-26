@@ -4,6 +4,7 @@
 //   node scripts/build.mjs            全ファイル
 //   node scripts/build.mjs --since 2026-08-01
 
+import './prio.mjs'   // 予定タスク経由だと BelowNormal になる。自分で上げる
 import { readdir, readFile, mkdir } from 'node:fs/promises'
 import { join, dirname, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -443,7 +444,7 @@ async function main() {
       }
 
       try {
-        db.exec('BEGIN')
+        db.exec('BEGIN IMMEDIATE')
         if (kind === 'K') {
           const { races, entries, payouts } = parseK(text, date)
           for (const r of races) {

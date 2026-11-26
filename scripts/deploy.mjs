@@ -23,13 +23,18 @@ const BUILD = join(ROOT, 'build')
 const argv = process.argv.slice(2)
 
 // 載せないもの
-const SKIP = new Set(['_local', 'デザイン変更の決まり.md', 'GPTへの指示.txt'])
+// 載せないものは**名前で列挙する**。
+// ⚠ 「下線で始まるものを全部外す」にしてはいけない。_headers と _redirects は
+//   Cloudflare Pages の設定ファイルで、外すとヘッダとSPAの転送が丸ごと効かなくなる
+//   （2026-10-06に一度そう書いて気づいた）。
+const SKIP = new Set(['_local', '_probe', 'デザイン変更の決まり.md', 'GPTへの指示.txt'])
+const skip = (name) => SKIP.has(name)
 
 function build() {
   rmSync(BUILD, { recursive: true, force: true })
   mkdirSync(BUILD, { recursive: true })
   for (const name of readdirSync(SITE)) {
-    if (SKIP.has(name)) continue
+    if (skip(name)) continue
     cpSync(join(SITE, name), join(BUILD, name), { recursive: true })
   }
   let files = 0, bytes = 0

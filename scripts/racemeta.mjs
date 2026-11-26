@@ -19,6 +19,7 @@
 //   公式の出走一覧ページ(raceindex) ……………………… 開催の総日数（初日〜最終日の数）
 //     番組表には総日数が書かれていない。成績側の MAX(day_no) は開催途中だと昨日までしか分からない。
 //     場ごとに1回だけ取る。順延・中止の日は数えない。
+import './prio.mjs'   // 予定タスク経由だと BelowNormal になる。自分で上げる
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFileSync, existsSync } from 'node:fs'
@@ -103,7 +104,7 @@ export async function ensureMeta(date, { refresh = false } = {}) {
     const lens = await seriesLen(date, [...new Set([...B.values()].map((x) => x.jcd))])
     const ins = db.prepare(`INSERT OR REPLACE INTO race_meta VALUES (?,?,?,?,?,?,?,?,?,?)`)
     const now = new Date().toISOString()
-    db.exec('BEGIN')
+    db.exec('BEGIN IMMEDIATE')
     for (const [id, x] of B) {
       const len = lens.get(x.jcd) ?? null
       ins.run(id, date, x.jcd, x.race_no, x.deadline, x.title, x.day_no, x.series, len, now)

@@ -49,6 +49,7 @@
 // ★まだ結論ではない
 //   254本は約0.85本/日。60通り試した中の1つでもある。
 //   単調性と分割を通っているので偶然の可能性は下がったが、消えてはいない。
+import './prio.mjs'   // 予定タスク経由だと BelowNormal になる。自分で上げる
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFileSync, existsSync } from 'node:fs'
@@ -299,7 +300,7 @@ if (argv.includes('--fill')) {
     OD.set(r.race_id + '|' + r.lane, r.tansho)
   const upd = db.prepare(`UPDATE b2_daily SET hit=?, payout=?, odds_final=? WHERE race_id=?`)
   let n = 0
-  db.exec('BEGIN')
+  db.exec('BEGIN IMMEDIATE')
   for (const r of rows) {
     const w = WIN.get(r.race_id); if (w == null) continue
     const hit = w === r.lane ? 1 : 0
@@ -313,7 +314,11 @@ if (argv.includes('--fill')) {
 }
 
 // ---------- 当日の判定 ----------
-const DATE = flag('date') || new Date().toISOString().slice(0, 10)
+// ⚠ 素の toISOString() はUTCの日付。JSTの深夜0〜9時に**前日**になる（2026-10-24に検出）。
+//   night2 は 02:00 に走るので、--date を付け忘れた瞬間に前日ぶんを判定してしまう。
+//   いまは呼び出し側が必ず --date を渡しているので表には出ていないが、既定値を直しておく。
+//   `Date.now()` は機械のタイムゾーンに影響されないので、+9時間してUTCで描けばJSTになる。
+const DATE = flag('date') || new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10)
 const f = join(ROOT, 'data', `predict-${DATE}.json`)
 if (!existsSync(f)) { console.error(`${f} がありません`); process.exit(1) }
 const j = JSON.parse(readFileSync(f, 'utf8'))
@@ -385,7 +390,7 @@ const ins = db.prepare(`INSERT INTO b2_daily
   WHERE b2_daily.hit IS NULL`)
 // ⚠ 最後の WHERE を外さないこと。結果が出た行の買い目を差し替えると、hit だけ残って嘘の記録になる。
 const stamp = new Date().toISOString()
-db.exec('BEGIN')
+db.exec('BEGIN IMMEDIATE')
 // ★選手名は racer_period から引く。programs.racer_name は番組表の4文字固定幅で切れている。
 const qName = db.prepare(`SELECT name FROM racer_period WHERE racer_id = (SELECT racer_id FROM programs
   WHERE race_id = ? AND lane = ?) ORDER BY CASE WHEN period <= ? THEN 0 ELSE 1 END, period DESC LIMIT 1`)

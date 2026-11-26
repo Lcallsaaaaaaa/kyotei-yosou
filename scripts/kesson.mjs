@@ -21,9 +21,10 @@
 // ★期限（due）より前は責めない
 //   朝4時に「配信の買い目が無い」と言われても困る。各項目に「この時刻までに
 //   出来ているはず」を持たせ、その時刻を過ぎてから欠品とする。
+import './prio.mjs'   // 予定タスク経由だと BelowNormal になる。自分で上げる
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { existsSync, readFileSync, writeFileSync, statSync, appendFileSync, mkdirSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, statSync, appendFileSync, mkdirSync, readdirSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -39,6 +40,33 @@ const HHMM = `${p2(now.getHours())}:${p2(now.getMinutes())}`
 const past = (due) => HHMM >= due
 
 const db = new DatabaseSync(join(ROOT, 'data', 'boatrace.db'), { readOnly: true })
+
+// ★見張る時間帯は、その日の締切から決める（2026-10-09）
+//   以前は '08:30'〜'21:30' と決め打ちだった。ところが**ナイターの最終締切は
+//   22:54**（10/08の実測）で、**21:30〜23:00は誰も見ていなかった**。
+//   開催は日によって違うので、時刻を書き足すのではなく番組表から取る。
+//   最初の締切の30分前から、最後の締切の30分後まで見る。
+const RACE_WINDOW = (() => {
+  const dl = []
+  for (const t of ['race_meta', 'races']) {
+    try {
+      for (const r of db.prepare(`SELECT deadline FROM ${t} WHERE date=? AND deadline IS NOT NULL`).all(TODAY))
+        dl.push(r.deadline)
+    } catch { /* その表がまだ無い */ }
+  }
+  if (!dl.length) return null                       // 番組表が無い日は時刻で判断しない
+  dl.sort()
+  const shift = (hhmm, min) => {
+    const [h, m] = hhmm.split(':').map(Number)
+    const t = Math.max(0, Math.min(24 * 60 - 1, h * 60 + m + min))
+    return `${p2(Math.floor(t / 60))}:${p2(t % 60)}`
+  }
+  return { from: shift(dl[0], -30), to: shift(dl.at(-1), 30) }
+})()
+/** いまレースのある時間帯か。番組表が取れない日は fallback の時刻で見る。 */
+const inRaceHours = (fallbackFrom, fallbackTo) => RACE_WINDOW
+  ? (HHMM >= RACE_WINDOW.from && HHMM <= RACE_WINDOW.to)
+  : (HHMM >= fallbackFrom && HHMM <= fallbackTo)
 db.exec('PRAGMA busy_timeout = 5000')
 const one = (sql, ...a) => { try { return db.prepare(sql).get(...a) } catch { return null } }
 
@@ -47,11 +75,46 @@ const items = []
 const add = (name, due, ok, detail) => items.push({ name, due, ok, detail })
 
 // ---------- ① 予想の素 ----------
+// ⚠ 大きさだけで見てはいけない（2026-10-28に踏んだ）。
+//   この日、予想ファイルは96万バイトあったが**末尾に古い内容の尻尾が残って壊れていた**
+//   （chokuzen と strategy が同じ固定名の一時ファイルを掴んだため）。
+//   展開予想APIはこれを読むので、**有料会員の中身がまるごと出なくなった**。
+//   それでも見張りは「1000バイト以上あるからOK」と言い続けた。**中身を読んで確かめる。**
 {
   const f = join(ROOT, 'data', `predict-${TODAY}.json`)
-  const ok = existsSync(f) && statSync(f).size > 1000
-  add('当日の予想ファイル', '04:00', ok,
-    ok ? `data/predict-${TODAY}.json` : 'これが無いと配信も無料枠も作れません')
+  let ok = false, detail = 'これが無いと配信も無料枠も作れません'
+  if (existsSync(f) && statSync(f).size > 1000) {
+    try {
+      const j = JSON.parse(readFileSync(f, 'utf8'))
+      const n = (j.races ?? []).length
+      ok = n > 0
+      detail = ok ? `${n}レース（${j.chokuzen_at ? '直前差し替え ' + j.chokuzen_at : '朝のまま'}）`
+        : '中身にレースがありません'
+    } catch (e) {
+      detail = `★壊れています（${String(e.message).slice(0, 50)}）。有料の展開予想が出ません`
+    }
+  }
+  add('当日の予想ファイル', '04:00', ok, detail)
+}
+
+// ---------- ①' 有料会員の展開予想 ----------
+// ★2026-10-28に追加。お金をいただいている中身なのに、見張りの対象外だった。
+//   予想ファイルが壊れた10/28、誰も気づかないまま半日出ていなかった。
+{
+  const f = join(ROOT, 'data', `predict-${TODAY}.json`)
+  let ok = false, detail = '予想ファイルが無いので判定できません'
+  if (existsSync(f)) {
+    try {
+      const j = JSON.parse(readFileSync(f, 'utf8'))
+      // 展開予想は trio / first / flow から api.mjs が組み立てる。
+      // ⚠ entries や lanes という持ち物は**無い**（2026-10-28に確かめた）。
+      //   実際の持ち物は race_id, conf, trio, first, top2, flow, sanrentan, …
+      const n = (j.races ?? []).filter((r) => Array.isArray(r.trio) && r.trio.length > 0).length
+      ok = n > 0
+      detail = ok ? `${n}レースぶん` : '0レース（有料会員に出せるものがありません）'
+    } catch { detail = '★予想ファイルが壊れていて組み立てられません' }
+  }
+  add('有料の展開予想', '07:30', ok, detail)
 }
 
 // ---------- ② 配信（3連複4点・3連単4点） ----------
@@ -98,11 +161,67 @@ const add = (name, due, ok, detail) => items.push({ name, due, ok, detail })
     ok ? `${(statSync(f).size / 1024).toFixed(0)}KB` : `logs/morning-post-${TODAY}.txt が無い／空`)
 }
 
+// ---------- ⑤'' SEO記事（ニュース・場別攻略） ----------
+// ★2026-10-28に追加。記事の生成は morning.sh の中にあり、
+//   morning が毎朝 3221225786（強制終了）で死んでいたため **10/23から5日間止まっていた**。
+//   見張りの対象外だったので、誰も気づかなかった。検索からの入口なので放置は効く。
+{
+  const dir = join(ROOT, 'content', 'news')
+  let ok = false, detail = 'content/news がありません'
+  try {
+    // ⚠ プレビュー記事（auto-preview-…）は**未来の日付**を名前に持つ（2026-10-29に踏んだ）。
+    //   外さないと「最新 2026-11-05」になり、止まっていても気づけない。
+    const names = readdirSync(dir).filter((n) => n.endsWith('.md') && !n.includes('preview'))
+    // ファイル名の日付（auto-YYYY-MM-DD-種類.md）で鮮度を見る。
+    const days = names.map((n) => (/(\d{4}-\d{2}-\d{2})/.exec(n) ?? [])[1])
+      .filter((d) => d && d <= TODAY).sort()
+    const last = days[days.length - 1] ?? null
+    ok = last === TODAY
+    detail = last ? (ok ? `最新 ${last}` : `最新が ${last}（今日のぶんがありません）`) : '1本もありません'
+  } catch { /* 読めない */ }
+  add('ニュース記事', '08:00', ok, detail)
+}
+{
+  const dir = join(ROOT, 'content', 'venues')
+  // 24場を1日1場ずつ回す設計。**3日以上どれも更新されていなければ止まっている。**
+  let ok = false, detail = 'content/venues がありません'
+  try {
+    const fs2 = readdirSync(dir).filter((n) => n.endsWith('.md'))
+    let newest = 0
+    for (const n of fs2) newest = Math.max(newest, statSync(join(dir, n)).mtimeMs)
+    const ageDays = (Date.now() - newest) / 86400000
+    ok = fs2.length >= 24 && ageDays < 3
+    detail = `${fs2.length}場・最後の更新は ${Math.floor(ageDays)}日前`
+  } catch { /* 読めない */ }
+  add('場別攻略記事', '08:00', ok, detail)
+}
+
+// ---------- ⑤''' 検索エンジンが見る静的HTML ----------
+// ★2026-10-30に追加。毎晩23:40の publish がメモリ不足で落ちていたのに
+//   keepawake-run.ps1 が終了コードを捨てていたため、タスクは毎回「成功」。
+//   **静的HTMLとサイトマップが10/23から7日間止まり**、クローラーには
+//   「1週間なにも起きていないサイト」に見えていた。アクセスの入口そのもの。
+//   データが新しくても、ここが止まれば検索からの流入は落ちる。
+{
+  const dir = join(ROOT, 'site')
+  let ok = false, detail = 'site/ がありません'
+  try {
+    // 代表として index.html の更新時刻を見る（全部を走査すると重い）
+    const idx = join(dir, 'index.html')
+    if (existsSync(idx)) {
+      const ageH = (Date.now() - statSync(idx).mtimeMs) / 3600000
+      ok = ageH < 36                      // 毎晩作り直すので、36時間を超えたら止まっている
+      detail = `最後の書き出しは ${Math.floor(ageH)}時間前`
+    } else detail = 'site/index.html がありません'
+  } catch { /* 読めない */ }
+  add('静的HTML（検索エンジン向け）', '01:00', ok, detail)
+}
+
 // ---------- ⑤' 直前のフルモデル差し替え ----------
 // ★展示が出て締切前のレースがあるのに、差し替えが動いていなければ欠品。
 //   止まっても画面は朝の数字を出し続けるので、見ているだけでは気づけない（2026-10-02）。
 {
-  const watch = HHMM >= '10:30' && HHMM <= '21:00'
+  const watch = inRaceHours('10:30', '21:00')
   const f = join(ROOT, 'logs', `chokuzen-${TODAY}.log`)
   const age = existsSync(f) ? (Date.now() - statSync(f).mtimeMs) / 60000 : null
   if (!watch) add('直前の予想差し替え', '10:30', true, '見張る時間帯の外')
@@ -123,7 +242,7 @@ const add = (name, due, ok, detail) => items.push({ name, due, ok, detail })
 // ---------- ⑦ 公開サイトが固まっていないか ----------
 // ★レースのある時間帯だけ見る。深夜に「更新が無い」と言っても意味がない。
 {
-  const watch = HHMM >= '08:30' && HHMM <= '21:30'
+  const watch = inRaceHours('08:30', '21:30')
   if (!watch) add('サイトの更新', '08:30', true, '見張る時間帯の外')
   else {
     let detail = '確かめられませんでした', ok = true
@@ -153,7 +272,7 @@ const add = (name, due, ok, detail) => items.push({ name, due, ok, detail })
 //   入るとこちらには何も届かない。**買い目があっても読めなければ欠品と同じ。**
 //   日に1回くらい静かに死ぬので、見つけたら先に知らせる。
 {
-  const watch = HHMM >= '07:30' && HHMM <= '23:00'
+  const watch = inRaceHours('07:30', '23:00')
   if (!watch) add('手元の画面', '07:30', true, '見張る時間帯の外')
   else {
     let ok = false, detail = ''
@@ -211,8 +330,10 @@ if (!QUIET && bad.length) {
     const text = bad.map((x) => `・${x.name}：${x.detail}`).join('\n')
     appendFileSync(join(ROOT, 'logs', `kesson-${TODAY}.log`), `${HHMM}\n${text}\n\n`, 'utf8')
     try {
-      const { notifyBuy } = await import('./notify.mjs')
-      await notifyBuy(text, `欠品 ${bad.length}件（${HHMM}）`)
+      // ★notifyBuy は買い目の記録（logs/buy-日付.txt）に追記するので使わない。
+      //   欠品の知らせが混ざると、あとで何を買ったのか読み返せなくなる（2026-10-20に発覚）。
+      const { notifyOps } = await import('./notify.mjs')
+      await notifyOps(text, `欠品 ${bad.length}件（${HHMM}）`)
     } catch (e) { console.log('知らせに失敗:', e.message) }
   }
 }

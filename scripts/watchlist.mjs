@@ -26,7 +26,7 @@ const db = new DatabaseSync(join(ROOT, 'data', 'boatrace.db'))
 db.exec('PRAGMA busy_timeout = 300000')
 const argv = process.argv.slice(2)
 const flag = (n, d = null) => { const i = argv.indexOf('--' + n); return i > -1 ? argv[i + 1] : d }
-const DATE = flag('date') || new Date().toISOString().slice(0, 10)
+const DATE = flag('date') || new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10)
 const CAL_TABLE = flag('cal', 'wi1')
 
 // ---------- 校正表を作る（過去の実績から） ----------

@@ -138,7 +138,7 @@ async function fetchOne(t) {
 }
 const flush = () => {
   if (!buf.length) return
-  db.exec('BEGIN')
+  db.exec('BEGIN IMMEDIATE')
   for (const x of buf) {
     if (x.status === 'ok') { for (const r of x.rows) insOdds.run(x.t.race_id, r.combo, r.odds); insFetch.run(x.t.race_id, stamp(), 'ok', x.rows.length) }
     else insFetch.run(x.t.race_id, stamp(), x.status, 0)

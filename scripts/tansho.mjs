@@ -40,6 +40,7 @@
 // ★⚠ 閾値は **pred3（本番の model5.json の出力）** で出すこと。
 //   model4 の pred で出すと本命が92.8%しか一致せず、確率が平均0.042ずれる。
 //   予想JSONの races[].first は model5 の出力なので、pred3 側と比べてよい。
+import './prio.mjs'   // 予定タスク経由だと BelowNormal になる。自分で上げる
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFileSync, existsSync } from 'node:fs'
@@ -126,7 +127,7 @@ if (argv.includes('--fill')) {
   console.log(`未照合 ${IDS.length}レース　結果の元：当日取り ${live} ／ 競走成績 ${kfile}`)
   const upd = db.prepare(`UPDATE tansho_daily SET hit=?, payout=? WHERE race_id=?`)
   let n = 0, changed = 0
-  db.exec('BEGIN')
+  db.exec('BEGIN IMMEDIATE')
   for (const r of rows) {
     const w = WIN.get(r.race_id)
     if (w == null) continue                          // 中止・失格などで1着が決まっていない
@@ -143,7 +144,7 @@ if (argv.includes('--fill')) {
 }
 
 // ここから記録モード
-const DATE = flag('date') || new Date().toISOString().slice(0, 10)
+const DATE = flag('date') || new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10)
 const f = join(ROOT, 'data', `predict-${DATE}.json`)
 if (!existsSync(f)) {
   console.error(`${f} がありません。先に predict.mjs --trio --json --out を走らせること`)
@@ -232,7 +233,7 @@ const ins = db.prepare(`INSERT INTO tansho_daily
 //   「1号艇と記録して的中、でも実際に買ったのは2号艇」という嘘の記録になる。
 //   走り終えたレースの予想は**歴史**なので、モデルを入れ替えても書き換えない。
 const now = new Date().toISOString()
-db.exec('BEGIN')
+db.exec('BEGIN IMMEDIATE')
 for (const x of picked)
   ins.run(x.r.race_id, DATE, x.r.venue, x.r.race_no, DL.get(x.r.race_id) ?? null,
     x.lane, x.racer, x.p, now, 'morning')

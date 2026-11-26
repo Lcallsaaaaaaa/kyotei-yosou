@@ -29,9 +29,10 @@
 //   predict.mjs は既定では当日の全レース（130〜170ページ）を同時6本で取りに行く。
 //   朝の1〜2回なら問題ないが、数分おきに回すと1時間で2,000ページを超えて遮断される。
 //   直前情報は before.mjs --live が常駐で集めているので --before-db でDBから読む。
+import './prio.mjs'   // 予定タスク経由だと BelowNormal になる。自分で上げる
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { readFileSync, writeFileSync, renameSync, existsSync, unlinkSync } from 'node:fs'
+import { readFileSync, writeFileSync, renameSync, existsSync, unlinkSync, statSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { DatabaseSync } from 'node:sqlite'
 
@@ -52,6 +53,35 @@ const MAIN = join(ROOT, 'data', `predict-${DATE}.json`)
 const TMP = join(ROOT, 'data', `chokuzen-${DATE}.json`)
 
 if (!existsSync(MAIN)) { console.log(`${MAIN} がありません（朝のバッチがまだ）。何もしません`); process.exit(0) }
+
+// ---------- 二重起動を止める（2026-10-28） ----------
+// ★なぜ要るか：この日、有料会員の中身がまるごと出なくなった。
+//   原因は predict-<日付>.json の破損で、壊れ方はこうだった：
+//     …"chokuzen_at":"10:15"}  at":"10:03"}
+//     （新しい内容のうしろに、古い内容の尻尾が残っている）
+//   一時ファイル名が**固定**だったため、2本のこの処理が同じ .tmp を掴み、
+//   後発が短い内容を書いたあと、先発が自分の残りを後ろへ書き足した。
+//   タスクは5分ごと・上限10分なので、機械が重い日は前の回が残ったまま次が動く。
+//   展開予想APIはこのファイルを読むので、**壊れた瞬間に有料の中身が全滅**する。
+//
+//   鍵と、プロセスごとに違う一時ファイル名の**両方**で塞ぐ。
+//   （鍵が取れない場面があっても、名前が違えば混ざらない）
+const LOCK = join(ROOT, 'data', `chokuzen-${DATE}.lock`)
+if (!DRY) {
+  const alive = (pid) => { try { process.kill(pid, 0); return true } catch (e) { return e.code === 'EPERM' } }
+  if (existsSync(LOCK)) {
+    let pid = null
+    try { pid = JSON.parse(readFileSync(LOCK, 'utf8')).pid } catch { /* 壊れていても年齢で見る */ }
+    const ageMin = (Date.now() - statSync(LOCK).mtimeMs) / 60000
+    if (pid && alive(pid) && ageMin < 15) {
+      console.log(`前の差し替えがまだ動いています（PID ${pid}・${Math.round(ageMin)}分前）。今回は見送ります`)
+      process.exit(0)
+    }
+    try { unlinkSync(LOCK) } catch { /* 消せなくても下で上書きする */ }
+  }
+  try { writeFileSync(LOCK, JSON.stringify({ pid: process.pid, at: new Date().toISOString() })) } catch { /* 書けなくても進む */ }
+  process.on('exit', () => { try { if (existsSync(LOCK)) unlinkSync(LOCK) } catch { /* 15分で無効になる */ } })
+}
 
 const db = new DatabaseSync(join(ROOT, 'data', 'boatrace.db'), { readOnly: true })
 db.exec('PRAGMA busy_timeout = 10000')
@@ -99,6 +129,7 @@ const fresh = JSON.parse(readFileSync(TMP, 'utf8'))
 const byId = new Map((fresh.races ?? []).map((r) => [r.race_id, r]))
 
 let swapped = 0, moved = 0
+const ledger = []          // 朝モデルとフルモデルを並べて残す（下で chokuzen_log へ）
 const races = (main.races ?? []).map((r) => {
   if (!target.includes(r.race_id)) return r
   const n = byId.get(r.race_id); if (!n) return r
@@ -107,6 +138,7 @@ const races = (main.races ?? []).map((r) => {
   const b = (n.first ?? []).slice().sort((x, y) => y.p - x.p)[0]
   if (a && b && a.lane !== b.lane) moved++
   swapped++
+  ledger.push([r, n])
   return n
 })
 
@@ -116,8 +148,60 @@ if (DRY) { console.log('--dry なので書き換えません'); process.exit(0) 
 // ★書き込みは一時ファイル → 置き換え。api.mjs が読んでいる最中の半端な中身を避ける
 main.races = races
 main.chokuzen_at = `${DATE} ${HHMM}`
-const w = MAIN + '.tmp'
+// ⚠ 一時ファイル名にPIDを入れること（2026-10-28）。
+//   固定名 `MAIN + '.tmp'` だと、2本が同時に動いたとき同じファイルを掴み、
+//   **新しい内容の後ろに古い内容の尻尾が残って壊れる**。実際に有料が全滅した。
+//   上の鍵と二重の守り。鍵をすり抜けても、名前が違えば混ざらない。
+const w = `${MAIN}.${process.pid}.tmp`
 writeFileSync(w, JSON.stringify(main))
+// ★置き換える前に、書けたものが本当に読めるJSONか確かめる。
+//   壊れたものを本番へ出すくらいなら、今回は見送るほうがよい。
+try { JSON.parse(readFileSync(w, 'utf8')) }
+catch (e) {
+  try { unlinkSync(w) } catch { /* 残っても害は無い */ }
+  console.log(`書き出したものが壊れていました（${String(e.message).slice(0, 60)}）。差し替えません`)
+  process.exit(1)
+}
 renameSync(w, MAIN)
 try { unlinkSync(TMP) } catch { /* 残っても害は無い */ }
 console.log(`${MAIN} を更新しました（サイトには次の送信で反映されます）`)
+
+// ---------- 朝モデルとフルモデルを並べて残す ----------
+// ★なぜここで残すか（2026-10-06）
+//   フルモデルが本当に効いているかは、2.5時間かけて一括で測り直すより
+//   **毎日ここで1行ずつ貯める**ほうが筋がいい。走らせ直す必要も無く、
+//   日が経つほど判定が確かになる。読み出しは scripts/chokuzen-report.mjs。
+//
+//   ⚠ 1レースにつき最初の1回だけ入れる（INSERT OR IGNORE）。
+//     chokuzen は数分おきに走るので、2回目以降の「朝モデル側」は
+//     すでにフルモデルの値になっていて、比べる相手にならない。
+const probs = (xs) => (xs ?? []).slice().sort((a, b) => b.p - a.p)
+  .map((x) => `${x.lane}:${x.p.toFixed(4)}`).join('|')
+const combos = (xs, k = 4) => (xs ?? []).slice(0, k).map((x) => x.combo).join(',')
+
+try {
+  const wdb = new DatabaseSync(join(ROOT, 'data', 'boatrace.db'))
+  wdb.exec('PRAGMA busy_timeout = 10000')
+  wdb.exec(`CREATE TABLE IF NOT EXISTS chokuzen_log (
+    race_id TEXT PRIMARY KEY, date TEXT NOT NULL, at TEXT NOT NULL,
+    m_probs TEXT, m_conf REAL, m_tri TEXT, m_puku TEXT,
+    f_probs TEXT, f_conf REAL, f_tri TEXT, f_puku TEXT)`)
+  wdb.exec('CREATE INDEX IF NOT EXISTS idx_chokuzen_log_date ON chokuzen_log(date)')
+  const ins = wdb.prepare(`INSERT OR IGNORE INTO chokuzen_log
+    (race_id, date, at, m_probs, m_conf, m_tri, m_puku, f_probs, f_conf, f_tri, f_puku)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+  let kept = 0
+  wdb.exec('BEGIN IMMEDIATE')
+  for (const [m, f] of ledger) {
+    const r = ins.run(m.race_id, DATE, `${DATE} ${HHMM}`,
+      probs(m.first), m.conf ?? null, combos(m.sanrentan), combos(m.sanrenpuku),
+      probs(f.first), f.conf ?? null, combos(f.sanrentan), combos(f.sanrenpuku))
+    kept += r.changes
+  }
+  wdb.exec('COMMIT')
+  wdb.close()
+  console.log(`比較の記録 +${kept}レース（既に記録済みの ${ledger.length - kept}レースは触らず）`)
+} catch (e) {
+  // ★記録に失敗しても差し替え自体は成功している。ここで落とさない
+  console.log(`比較の記録に失敗（差し替えは成功しています）: ${e.message}`)
+}

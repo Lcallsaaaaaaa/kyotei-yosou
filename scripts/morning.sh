@@ -21,7 +21,15 @@ echo "=== $TODAY 06:00  当日の準備と予想 ==="
 echo "--- 1/9 当日の番組表を取り込み ---"
 node scripts/download.mjs "$TODAY" "$TODAY" 2>&1 | tail -2
 node scripts/extract.mjs 2>&1 | tail -1
-node scripts/build.mjs 2>&1 | tail -2
+# ⚠ 範囲を絞って ANALYZE も飛ばす（2026-10-22）。
+#   ここは長らく `node scripts/build.mjs` つまり**全期間＋ANALYZE**という最重量版だった。
+#   4年ぶん2,300ファイルの作り直しに加えてANALYZEが13分。06:00は本人が機械を
+#   使い始める時間帯でもあり、**morning はここで落ちて 3221225786（強制終了）**になっていた。
+#   ・古いファイルの取り込み直しは night2(02:00) が全期間で担当している
+#   ・ANALYZE は catchup(15:00) が毎日流している
+#   よってここは直近だけで足りる。60分超 → 数秒。
+SINCE=$(date -d '14 days ago' +%F)
+node scripts/build.mjs --since "$SINCE" --no-analyze 2>&1 | tail -2
 
 echo "--- 2/9 特徴量を作り直し ---"
 node --max-old-space-size=8192 scripts/derive.mjs 2>&1 | tail -2
@@ -73,6 +81,15 @@ echo ""
 echo "--- ニュースの自動生成（前日の結果・今日の開催・グレード開催の予告・予想の結果）---"
 # 2026-09-23：データの事実だけで書く。content/news/ に置く（公開は sync-public.mjs）
 node --max-old-space-size=4096 scripts/news.mjs 2>&1 | tail -1
+
+echo ""
+echo "--- 場ごとの攻略記事（1日1場・24日で一周）---"
+# 2026-10-11：集めたデータだけで組み立てる。生成AIに文章を書かせない。
+#   Googleのスパムポリシー（2026-08-28更新）が「付加価値なく生成AIで多数のページを作ること」を
+#   大量生成コンテンツの不正使用として名指ししているため。詳しくは scripts/venue-article.mjs の冒頭。
+# 置き場は content/venues/<場コード>.md ＝ /venue/<場コード> の中の「人が書く枠」。
+#   新しいURLを増やさないので、既存の攻略ページと食い合わない。
+node scripts/venue-article.mjs 2>&1 | tail -1
 
 # 月末が近づいたら、翌月の合言葉を note に貼るよう知らせる（会員の仕組み.md）
 if [ "$(date +%d)" -ge 25 ]; then

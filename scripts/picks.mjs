@@ -52,6 +52,7 @@
 //     その分は3〜4倍帯の成績(111.6%)になるので 0.89×156.3 + 0.11×111.6 ＝ **約151%**
 //   ※目減りの根拠は8/20の63レース分のみ。ここが最も弱い。1週間ぶん貯まれば精度が上がる。
 
+import './prio.mjs'   // 予定タスク経由だと BelowNormal になる。自分で上げる
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'

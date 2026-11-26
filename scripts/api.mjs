@@ -238,6 +238,47 @@ function picksOf(db, date) {
         trio: a.trio.map((r) => pk(r, '=')), trifecta: a.tri.map((r) => pk(r, '-')) })
     }
   }
+  // 買い方の型（2026-10-06）。レースの自信度で出す型が変わる。
+  // ★実測値を一緒に渡す。的中率だけ出して回収率を隠すのは不誠実なので、
+  //   画面が必ず両方書けるようにここで持たせる（patterns.mjs の冒頭が出どころ）。
+  if (has(db, 'patterns_daily')) {
+    const META = {
+      // ★振り分けを「本命の1着確率55%」に変えたので、数字も測り直した（2026-10-09）。
+      //   歩進検証45,340レース（堅い25,965／割れた19,375）。全部が前半後半で揃う。
+      //   出どころは scripts/oana-split.mjs。⚠ 振り分けを変えたら必ずここも入れ替える。
+      honmei_tan: { name: '本命', kind: '3連単4点', yen: 400, sep: '-', order: 1,
+        hit: '35.5〜36.5%', roi: '81.6〜82.1%', avg: 909, best: 6710, man: null },
+      honmei_fuku: { name: '本命', kind: '3連複4点', yen: 400, sep: '=', order: 2,
+        hit: '65.5〜66.6%', roi: '79.5〜79.8%', avg: 483, best: 4510, man: null },
+      kenjitsu: { name: '堅実', kind: '3連複2点', yen: 200, sep: '=', order: 3,
+        hit: '43.5〜44.2%', roi: '81.1〜81.3%', avg: 370, best: 1970, man: null },
+      chuana: { name: '中穴', kind: '3連単4点', yen: 400, sep: '-', order: 4,
+        hit: '14.1%', roi: '78.8〜80.8%', avg: 2258, best: 36710, man: 2153 },
+      oana: { name: '大穴', kind: '3連単4点', yen: 400, sep: '-', order: 5,
+        hit: '6.1〜6.5%', roi: '76.8〜79.7%', avg: 4952, best: 110690, man: 185 },
+    }
+    const by = new Map()
+    for (const r of db.prepare(`SELECT race_id, pattern, kind, rank, combo, p, hit, payout, conf
+      FROM patterns_daily WHERE date=? ORDER BY race_id, pattern, rank`).all(date)) {
+      if (!by.has(r.race_id)) by.set(r.race_id, { conf: r.conf, groups: new Map() })
+      const g = by.get(r.race_id).groups
+      if (!g.has(r.pattern)) g.set(r.pattern, [])
+      g.get(r.pattern).push(r)
+    }
+    for (const [id, a] of by) {
+      const list = [...a.groups].map(([key, rows]) => {
+        const m = META[key]; if (!m) return null
+        return { key, name: m.name, kind: m.kind, yen: m.yen, order: m.order,
+          picks: rows.map((r) => ({ combo: r.combo.split('-').join(m.sep), probability: r1(r.p),
+            hit: r.hit == null ? null : r.hit === 1, payout: r.hit === 1 ? r.payout : null })),
+          // 歩進検証45,340レースの実測（前半〜後半の幅）
+          measured: { hit: m.hit, roi: m.roi, avg_payout: m.avg, best_payout: m.best,
+            man_per_races: m.man } }
+      }).filter(Boolean).sort((x, y) => x.order - y.order)
+      if (list.length) put(id, 'patterns', { confidence: Math.round(a.conf * 100),
+        zone: list.some((x) => x.key === 'oana') ? 'ana' : 'honmei', list })
+    }
+  }
   if (has(db, 'tansho_daily'))
     for (const r of db.prepare(`SELECT race_id, lane, racer, p, hit, payout FROM tansho_daily WHERE date=?`).all(date))
       put(r.race_id, 'free_win', { name: '無料枠（単勝1点）', yen: 100, lane: r.lane, racer: r.racer, probability: r1(r.p),
@@ -281,7 +322,8 @@ function buildRace(db, date, id, ctx, full) {
   if (!full) {
     const top = pr?.first ? [...pr.first].sort((a, b) => b.p - a.p)[0] : null
     return { ...base, favorite: top ? { lane: top.lane, name: ents.find((e) => e.lane === top.lane)?.name ?? top.name, win_probability: r1(top.p) } : null,
-      has_paid_picks: ctx.picks.has(id) && !!(ctx.picks.get(id).plan2 || ctx.picks.get(id).haishin) }
+      has_paid_picks: ctx.picks.has(id) && !!(ctx.picks.get(id).plan2 || ctx.picks.get(id).haishin
+        || ctx.picks.get(id).patterns) }
   }
   // ★直前情報（展示・進入・チルト・部品交換・気象）。当日は before.mjs --live がレース前に集める（2026-09-22〜）
   const bi = new Map(db.prepare(`SELECT lane, weight, adj_weight, ex_time, tilt, parts, ex_course, ex_st, ex_st_flag

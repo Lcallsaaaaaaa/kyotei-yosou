@@ -43,6 +43,7 @@
 //   ⚠ 最初は「モデルの上位3点＝市場の上位3点」で絞る案だった（3連複4点 69.46%）。
 //     これは**朝には判定できない**。3連単オッズは翌日にしか取っていないため。
 //     さらに自信度絞りのほうが同じ本数で +7.43pt 上だったので、市場は使わない。
+import './prio.mjs'   // 予定タスク経由だと BelowNormal になる。自分で上げる
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFileSync, existsSync } from 'node:fs'
@@ -145,7 +146,7 @@ if (argv.includes('--fill')) {
   console.log(`未照合 ${IDS.length}レース　結果の元：当日取り ${live} ／ 競走成績のみ ${kfile}`)
   const upd = db.prepare(`UPDATE haishin_daily SET hit=?, payout=? WHERE race_id=? AND kind=? AND rank=?`)
   let n = 0, changed = 0
-  db.exec('BEGIN')
+  db.exec('BEGIN IMMEDIATE')
   for (const r of rows) {
     const w = WIN.get(r.race_id)
     if (!w || !w[1] || !w[2] || !w[3]) continue     // 中止・失格などで3着まで揃わない
@@ -163,7 +164,7 @@ if (argv.includes('--fill')) {
 }
 
 // ★ conf 列を後から足した回。空だったので作り直し済み（2026-08-31）。
-const DATE = flag('date') || new Date().toISOString().slice(0, 10)
+const DATE = flag('date') || new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10)
 const f = join(ROOT, 'data', `predict-${DATE}.json`)
 if (!existsSync(f)) { console.error(`${f} がありません。先に predict.mjs --trio --json --out を走らせること`); process.exit(1) }
 const j = JSON.parse(readFileSync(f, 'utf8'))
@@ -268,7 +269,7 @@ const ins = db.prepare(`INSERT INTO haishin_daily
 //   走り終えたレースの予想は**歴史**なので、モデルを入れ替えても書き換えない。
 const stamp = new Date().toISOString()
 let n = 0
-db.exec('BEGIN')
+db.exec('BEGIN IMMEDIATE')
 for (const x of picked) {
   const a = [x.r.race_id, DATE, x.r.venue, x.r.race_no, DL.get(x.r.race_id) ?? null, x.conf]
   x.ta.forEach((y, i) => { ins.run(...a, 'sanrentan', i + 1, y.combo, y.p, 0, stamp); n++ })

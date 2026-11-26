@@ -18,6 +18,7 @@
 //
 // ★検証のしかたは model4 と同じ
 //   学習→補正→検証の3期間に分け、検証期間は買い方を決めるのに一切使わない。
+import './prio.mjs'   // 予定タスク経由だと BelowNormal になる。自分で上げる
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
@@ -460,13 +461,13 @@ db.exec(`DROP TABLE IF EXISTS ${P3}`)
 db.exec(`CREATE TABLE ${P3} (race_id TEXT NOT NULL, combo TEXT NOT NULL, p REAL, split TEXT,
   PRIMARY KEY (race_id, combo))`)
 const ins = db.prepare(`INSERT OR REPLACE INTO ${P3} (race_id,combo,p,split) VALUES (?,?,?,?)`)
-db.exec('BEGIN')
+db.exec('BEGIN IMMEDIATE')
 let nSaved = 0
 for (const [list, sp] of [[calib, 'calib'], [test, 'test']])
   for (const race of ok3(list)) {
     const ps = trioProbs(W, race)
     const tot = ps.reduce((a, x) => a + x.p, 0)
-    for (const x of ps) { ins.run(race.race_id, x.combo, x.p / tot, sp); if (++nSaved % 200000 === 0) { db.exec('COMMIT'); db.exec('BEGIN') } }
+    for (const x of ps) { ins.run(race.race_id, x.combo, x.p / tot, sp); if (++nSaved % 200000 === 0) { db.exec('COMMIT'); db.exec('BEGIN IMMEDIATE') } }
   }
 db.exec('COMMIT')
 db.exec(`CREATE INDEX IF NOT EXISTS idx_${P3}_split ON ${P3}(split)`)

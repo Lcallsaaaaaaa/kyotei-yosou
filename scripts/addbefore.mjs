@@ -15,6 +15,7 @@
 //   充足率が7,170/160,392（4.5%）しかない。交換したレースだけ記録されるため。
 //   NULLは「交換なし」を意味するので、0として扱う。
 
+import './prio.mjs'   // 予定タスク経由だと BelowNormal になる。自分で上げる
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
@@ -90,7 +91,7 @@ const upd = db.prepare(`UPDATE feat SET
   WHERE race_id=? AND lane=?`)
 
 let n = 0, skipped = 0
-db.exec('BEGIN')
+db.exec('BEGIN IMMEDIATE')
 for (const [rid, g] of byRace) {
   const valid = g.filter((x) => x.ex_time != null && x.ex_time > 0)
   const mean = valid.length ? valid.reduce((a, x) => a + x.ex_time, 0) / valid.length : null
@@ -117,7 +118,7 @@ for (const [rid, g] of byRace) {
       rid, x.lane)
     if (r.changes) n++; else skipped++
   }
-  if (n % 50000 === 0 && n) { db.exec('COMMIT'); db.exec('BEGIN') }
+  if (n % 50000 === 0 && n) { db.exec('COMMIT'); db.exec('BEGIN IMMEDIATE') }
 }
 db.exec('COMMIT')
 db.exec('ANALYZE feat')

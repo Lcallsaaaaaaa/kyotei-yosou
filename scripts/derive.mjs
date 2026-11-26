@@ -21,6 +21,7 @@
 //   モーター：全体／当地／直近／展示タイム
 //   ボート、進入（枠なり率・平均進入コース）、事故（F・L・失格）
 
+import './prio.mjs'   // 予定タスク経由だと BelowNormal になる。自分で上げる
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
@@ -210,10 +211,10 @@ console.log(`  特徴量 ${cols.length} 項目`)
 
 let processed = 0
 let pending = 0
-db.exec('BEGIN')
+db.exec('BEGIN IMMEDIATE')
 const emit = (o) => {
   ins.run(o.race_id, o.lane, ...cols.map((c) => (o[c] === undefined ? null : o[c])))
-  if (++pending >= 20000) { db.exec('COMMIT'); db.exec('BEGIN'); pending = 0 }
+  if (++pending >= 20000) { db.exec('COMMIT'); db.exec('BEGIN IMMEDIATE'); pending = 0 }
 }
 
 for (const race of races) {

@@ -23,7 +23,7 @@ const db = new DatabaseSync(join(ROOT, 'data', 'boatrace.db'))
 db.exec('PRAGMA busy_timeout = 300000')
 const argv = process.argv.slice(2)
 const flag = (n, d = null) => { const i = argv.indexOf('--' + n); return i > -1 ? argv[i + 1] : d }
-const DATE = flag('date') || new Date().toISOString().slice(0, 10)
+const DATE = flag('date') || new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10)
 const CONC = Number(flag('conc', '4'))
 const DELAY = Number(flag('delay', '250'))
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))

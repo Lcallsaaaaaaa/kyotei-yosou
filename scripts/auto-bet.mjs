@@ -25,6 +25,7 @@
 //   落ちて取りこぼす。実際に福岡6R・7Rを落とした。
 //   → すでに記録がある日は、その候補をそのまま引き継ぐ。
 
+import './prio.mjs'   // 予定タスク経由だと BelowNormal になる。自分で上げる
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
@@ -164,7 +165,14 @@ for (const T of TYPES) {
 if (DRY) { log('--dry のため判定は行いません'); db.close(); process.exit(0) }
 
 log(`\n締切${S.CHECK_FROM}分前〜${S.CHECK_UNTIL}分前に判定します。（Ctrl+Cで終了）`)
-for (;;) {
+
+// ★1周ぶんを関数に切り出してある。例外1回で日中の判定が丸ごと止まらないため。
+//   2026-10-31 11:45、`database is locked`（SQLITE_BUSY）が1回出ただけで
+//   プロセスが落ちた。見張りが立て直す11:51までの6分間、締切前の判定が全部抜けた。
+//   busy_timeout=300000 を入れてあっても、WAL では読み取りスナップショットを
+//   持ったまま書くと即 BUSY が返るので、待ち時間では防げない。
+//   だから「落ちない」ではなく「落ちてもその周回だけ捨てる」で守る。
+const onePass = async () => {
   const n = nowMin()
   let anyPending = false
   let soonest = Infinity        // 一番近い締切まで何分か（周回間隔の決定に使う）
@@ -241,11 +249,25 @@ for (;;) {
   // ★pendingが無くなっても終了しない。画面の「予想」ボタンで候補が足される。
   //   その日の最終レースの締切を過ぎたら終わる。
   const last = db.prepare(`SELECT MAX(deadline) d FROM bets WHERE date=?`).get(DATE)?.d
-  if (!anyPending && (!last || toMin(last) < nowMin() - 30)) { log('本日の全レースが終了しました'); break }
+  if (!anyPending && (!last || toMin(last) < nowMin() - 30)) return 'done'
   // ★判定窓は締切2〜3分前しかない。近いときは速く回さないと窓を跨いでしまう。
   //   （12分前判定をやめた理由は strategy.mjs の CHECK_FROM を参照）
-  beat()
   await sleep(!anyPending ? 180_000 : soonest <= 6 ? 15_000 : soonest <= 20 ? 60_000 : 120_000)
+  return 'again'
+}
+
+for (;;) {
+  // ★失敗した周回でも鼓動は打つ。打たないと見張りに殺され、立て直しの間また抜ける。
+  beat()
+  let r
+  try {
+    r = await onePass()
+  } catch (e) {
+    log(`⚠ この周回は失敗しました（${e.message}）。20秒後にやり直します`)
+    await sleep(20_000)
+    continue
+  }
+  if (r === 'done') { log('本日の全レースが終了しました'); break }
 }
 
 for (const r of db.prepare(`SELECT bet_type, decision, COUNT(*) n FROM bets WHERE date=? GROUP BY 1,2`).all(DATE))

@@ -20,10 +20,10 @@ TODAY=$(date +%Y-%m-%d)
 YEST=$(date -d "yesterday" +%Y-%m-%d 2>/dev/null || date -v-1d +%Y-%m-%d)
 echo "=== $TODAY 05:00  前日($YEST)の収集と分析 ==="
 
-echo "--- 1/4 前日までの結果を取り込み ---"
+echo "--- 1/5 前日までの結果を取り込み ---"
 node scripts/daily.mjs 2>&1 | tail -3
 
-echo "--- 2/4 前日の確定オッズと直前情報 ---"
+echo "--- 2/5 前日の確定オッズと直前情報 ---"
 node scripts/odds.mjs  --from "$YEST" --to "$YEST" --conc 6 --delay 60 2>&1 | tail -1
 node scripts/odds2.mjs --from "$YEST" --to "$YEST" --conc 6 --delay 60 2>&1 | tail -1
 node scripts/odds3.mjs --from "$YEST" --to "$YEST" --conc 6 --delay 60 2>&1 | tail -1
@@ -35,7 +35,7 @@ node scripts/before.mjs --from "$YEST" --to "$YEST" --conc 6 --delay 60 2>&1 | t
 #   判定は開催名から行い、1号艇のA1率で検算している（SG/G1は98.5%、G3以下は13〜21%）。
 node scripts/grade.mjs --apply 2>&1 | tail -2
 
-echo "--- 3/4 前日の予想に結果を埋める ---"
+echo "--- 3/5 前日の予想に結果を埋める ---"
 node scripts/record3.mjs --fill 2>&1 | tail -2
 # 配信用（3連複/3連単）も同じタイミングで照合する。買う判定とは別テーブル。
 # 当日は公式の結果ページ（速報）で埋めているので、--recheck で競走成績と突き合わせ直す。
@@ -49,7 +49,7 @@ node scripts/tansho.mjs --fill --date "$YEST" --recheck 2>&1 | tail -2
 node scripts/haishin.mjs --fill 2>&1 | tail -1
 node scripts/tansho.mjs --fill 2>&1 | tail -1
 
-echo "--- 4/4 たまった分の成績 ---"
+echo "--- 4/5 たまった分の成績 ---"
 node scripts/record3.mjs --report 2>&1 | tail -22
 echo ""
 echo "--- 配信用の成績 ---"
@@ -74,3 +74,13 @@ db.close()
 
 echo ""
 echo "=== 完了 $(date +%H:%M:%S) ==="
+
+# ★バックテスト表の作り直し（2026-10-09に15:30のバッチから移した）
+#   8GBのヒープを使う。以前は auto-results.bat が15:30＝レースの真ん中で回しており、
+#   ・常駐5本をメモリから追い出してサイトの更新を止めていた（10/06は40分）
+#   ・DBの書き込みを奪い合って落ちていた（10/08「database is locked」）
+#   レースが終わってから回せば、どちらも起きない。
+#   scripts/backtest.mjs が読む bt 表は、前日ぶんが入っていれば足りる。
+echo ""
+echo "--- 5/5 バックテスト表の作り直し ---"
+node --max-old-space-size=8192 scripts/bt-build.mjs 2>&1 | tail -3

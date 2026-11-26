@@ -28,7 +28,7 @@ const DAY = jd.getUTCDate()
 // R2 の代わり。member/free/… と races/… だけ「ある」ことにする。
 const DATA = {
   async get(path) {
-    if (path === 'member/free/2026-10-05.json' || path === 'races/2026-10-05.json')
+    if (['member/free/2026-10-05.json', 'member/alerts/2026-10-05.json', 'races/2026-10-05.json'].includes(path))
       return { body: JSON.stringify({ ok: path }), httpEtag: '"e1"' }
     return null
   },
@@ -102,6 +102,14 @@ await T('公開ぶんは鍵なしで 200', 200, () => call('races/2026-10-05.jso
 await T('公開ぶんの無いもの → 404', 404, () => call('races/1999-01-01.json'))
 await T('有料は鍵では開かない（無いので404）', 404, () => call('paid/race/x.json', { key: KEY }))
 await T('鍵ありでも無いものは 404', 404, () => call('member/free/1999-01-01.json', { key: KEY }))
+
+// アラートも member/ 置き場（2026-10-06・「リッチメニューLINE登録が必須」）
+const AL = 'member/alerts/2026-10-05.json'
+await T('アラートは鍵なしで 401', 401, () => call(AL))
+await T('アラートは鍵ありで 200', 200, () => call(AL, { key: KEY }))
+await T('アラートは ?k= でも 200', 200, () => call(AL, { qkey: KEY }))
+await T('アラートは違う鍵だと 401', 401, () => call(AL, { key: 'x'.repeat(22) }))
+await T('アラートはメール登録でも 200', 200, () => call(AL, { bearer: 'good-1' }))
 
 console.log('■ 設定が欠けているとき')
 await T('FREE_KEY 未設定 → 鍵は効かない 401', 401, () => call(F, { key: KEY, env: { FREE_KEY: undefined } }))

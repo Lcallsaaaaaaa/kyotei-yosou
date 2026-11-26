@@ -13,9 +13,10 @@
 //   進入コースは締切後にしか決まらないので**枠番**を使う。
 //   実際の進入と枠番が一致するのは約85%。実進入を使うと成績が実際より良く出る。
 
+import './prio.mjs'   // 予定タスク経由だと BelowNormal になる。自分で上げる
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, renameSync, unlinkSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -641,9 +642,17 @@ if (argv.includes('--trio')) {
       // ★3連単・3連複の順位表（上位12点）。買うためではなく、
       //   ①2着3着のデータを日々ためて後でモデル改善に使う ②娯楽枠の配信に使う。
       //   単勝の判定には一切使わない。
-      // ★24点まで保存する。12点だと配信用の「穴」が85%しか拾えなかった
-      //   （穴は中央値7位・上位90%で13位・最大30位）。
-      sanrentan: [...trios].sort((a, b) => b.p - a.p).slice(0, 24).map((t) => ({ combo: t.combo, p: t.p })),
+      // ★120点（全部）保存する。
+      //   12点 → 24点 … 配信用の「穴」が85%しか拾えなかった
+      //                  （穴は中央値7位・上位90%で13位・最大30位）
+      //   24点 → 120点 … **大穴の型（本命を外す4点）が本番でそろわなかった**（2026-10-06）。
+      //     本命が1・2号艇のレースでは上位24点が本命1着の組で埋まり、
+      //     本命を外した組が1〜2点しか残らない。そのせいで
+      //       測定（120点から選ぶ）  4.0点・回収 83.6%/85.2%・最高110,690円
+      //       本番（ 24点から選ぶ） 3.2点・回収 96.1%/75.6%・最高 26,770円
+      //     と、**測った物と出る物が違っていた**（前半後半が20pt食い違う＝当てにできない）。
+      //     120通りしか無いので全部持っても増えるのは1レースあたり数KB。
+      sanrentan: [...trios].sort((a, b) => b.p - a.p).map((t) => ({ combo: t.combo, p: t.p })),
       // ★1着の艇ごとの最良の組。配信用の「穴」は必ずここから取れる。
       //   上位24点だけだと1着が1・2号艇の組で埋まって、別の艇を1着にした組が
       //   1つも残らないことがある（実際に唐津3Rで起きた）。6艇ぶん必ず持っておく。
@@ -691,7 +700,20 @@ if (argv.includes('--trio')) {
       })),
     })
     if (OUT) {
-      writeFileSync(OUT, payload)
+      // ⚠ 直接上書きしないこと（2026-10-28）。
+      //   この出力先は chokuzen.mjs と strategy.mjs も書く**共有のファイル**で、
+      //   さらに api.mjs が読んでいる。途中の半端な中身を読まれると
+      //   展開予想が落ち、**有料会員の中身が全滅する**（10/28に実際に起きた）。
+      //   一時ファイル（PID付き）に書き、読めるJSONだと確かめてから置き換える。
+      const tmp = `${OUT}.${process.pid}.tmp`
+      writeFileSync(tmp, payload)
+      try { JSON.parse(readFileSync(tmp, 'utf8')) }
+      catch (e) {
+        try { unlinkSync(tmp) } catch { /* 残っても害は無い */ }
+        console.error(`  [出力] 書き出したものが壊れていました（${String(e.message).slice(0, 60)}）。置き換えません`)
+        process.exit(1)
+      }
+      renameSync(tmp, OUT)
       console.log(`  [出力] ${OUT}（${payload.length.toLocaleString()}文字）`)
     } else {
       console.log(payload)

@@ -20,6 +20,16 @@
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
+import { heavyGuard } from './heavy-guard.mjs'
+
+// ★レース中は走らせない（2026-10-09）
+//   15:30のバッチでこれが8GBのヒープで動いていた。レースの真ん中である。
+//   ・メモリを奪って常駐5本をディスクへ追い出し、サイトの更新を止めていた
+//     （10/06は40分かかっている）
+//   ・DBの書き込みも奪い合って落ちていた（10/08「database is locked」）
+//   夜に回すのが正しい。どうしても昼に走らせるなら --force。
+heavyGuard('bt-build.mjs')
+
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const db = new DatabaseSync(join(ROOT, 'data', 'boatrace.db'))

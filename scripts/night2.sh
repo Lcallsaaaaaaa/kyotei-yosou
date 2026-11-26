@@ -19,11 +19,38 @@ cd "/c/Users/sames/Desktop/競艇予想"
 TODAY=$(date +%Y-%m-%d)
 echo "=== $TODAY 02:00  当日ぶんを先回りで作る ==="
 
+# ★重い処理が重なっていないか確かめてから始める（2026-11-12）。
+#   このスクリプトは長らく**何も確認せずに derive を始めて**いた。
+#   搭載7.8GBのこの機械では derive が2本走ると食い合って共倒れする
+#   （heavy.mjs の注意書きのとおり）。
+#   11/12 01:31、当日ぶんが無いので ensure-day を手で走らせた直後に、
+#   02:00 の night2 がそこへ突っ込む形になりかけた。
+#   走っているなら2分おきに最大60分待つ。それでも終わらなければ今回は見送る。
+#   見送っても ensure-day（06:30〜22:30・30分毎）と recover.mjs が拾うので、
+#   当日ぶんが消えることはない。
+for i in $(seq 1 30); do
+  node scripts/heavy.mjs --quiet && break
+  echo "重い処理が走っています。2分待ちます（$i/30）"
+  sleep 120
+done
+if ! node scripts/heavy.mjs --quiet; then
+  echo "重い処理が終わらないので今回は見送ります（ensure-day が拾います）"
+  exit 0
+fi
+
 echo "--- 1/9 当日の番組表を取り込み ---"
 node scripts/download.mjs "$TODAY" "$TODAY" 2>&1 | tail -2
 node scripts/extract.mjs 2>&1 | tail -1
 # ⚠ ANALYZE は飛ばす（13分かかる）。前日の結果を入れる 05:00 と 15:00 で流している。
-node scripts/build.mjs --no-analyze 2>&1 | tail -2
+# ⚠ 範囲も絞る（2026-11-13）。
+#   ここは長らく範囲指定なし＝**全期間1,549ファイルの作り直し**だった。
+#   それが役目という設計だったが、搭載7.8GBのこの機械では終わらない。
+#   実際 night2 は 11/07 を最後に**一度も完走していない**（ログが step 1/9 で止まる）。
+#   11/13 02:05 に始まった build は16分たって実メモリ1MB＝完全に追い出されていた。
+#   全期間の作り直しは catchup(15:00) が同じ `build.mjs`（範囲なし）で担当しているので、
+#   ここは直近14日で足りる。morning.sh が 10/22 に同じ理由で絞ったのと同じ判断。
+SINCE=$(date -d '14 days ago' +%F)
+node scripts/build.mjs --since "$SINCE" --no-analyze 2>&1 | tail -2
 
 echo "--- 2/9 開催のグレードを判定 ---"
 # ⚠ build.mjs は races.grade を書かない。これを回さないと企画枠の自動判別ができない。
@@ -56,13 +83,17 @@ node scripts/b2.mjs --date "$TODAY" 2>&1 | tail -4
 echo "--- 8/9 企画枠（SG/G1/G2を自動判別）---"
 node scripts/spot.mjs --date "$TODAY" --auto 2>&1 | tail -6
 
-echo "--- 9/9 モデルを最新データで学習し直す（合格したときだけ入れ替え）---"
-# ★2026-09-14に追加。本番モデルは9/6に作ったきりで、学習データが4/5で止まっていた。
-#   同じレースで比べると新しいデータで学習したほうが確率の見積もりが正確だった（retrain.sh 冒頭に数字）。
-#   ⚠ 予想と記録（1〜8）が全部終わってから回す。今日の予想は前のモデルのまま、
-#     入れ替わった新モデルは 06:00 の朝の更新から使われる。
-#   ⚠ 失敗しても今日の予想には影響しない（パイプの末尾が tail なので set -e で止まらない）。
-bash scripts/retrain.sh 2>&1 | tail -25
+echo "--- 9/9 モデルの再学習は別タスクへ移しました（2026-10-20）---"
+# ★ここに `bash scripts/retrain.sh` があったが、タスク boatrace-retrain へ切り出した。
+#   理由：**1〜8 の途中で死ぬと 9 まで届かず、再学習が丸ごと飛ぶ**。
+#   10/18・10/19・10/20 と3日続けて飛び、本番モデルは10/17のまま止まっていた。
+#   一番長い処理の一番最後は、一番落ちやすい場所だった。
+#
+#   新しい置き場：scripts/auto-retrain.bat → ensure-retrain.sh → retrain.sh
+#     03:30 から30分ごと・09:00 まで。回すかは retrain-needed.mjs が決める
+#     （今日もう済んだ／重い処理が走っている／feat が古い／3回試した→回さない）。
+#   ⚠ ここに戻さないこと。戻すと二重に走る（needed 判定で片方は空振りするが無駄）。
+echo "  → タスク boatrace-retrain が 03:30〜09:00 に面倒を見ます"
 
 echo ""
 echo "=== 完了 $(date +%H:%M:%S) ==="

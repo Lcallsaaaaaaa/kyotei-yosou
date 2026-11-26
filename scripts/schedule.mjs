@@ -109,7 +109,7 @@ const upS = db.prepare(`INSERT INTO schedule (jcd,start_date,end_date,days,title
 let nS = 0
 for (const ym of months) {
   const list = parseMonth(await get(`https://www.boatrace.jp/owpc/pc/race/monthlyschedule?ym=${ym}`), ym)
-  db.exec('BEGIN'); for (const x of list) { upS.run(x.jcd, x.start, x.end, x.days, x.title, x.grade, stamp); nS++ } db.exec('COMMIT')
+  db.exec('BEGIN IMMEDIATE'); for (const x of list) { upS.run(x.jcd, x.start, x.end, x.days, x.title, x.grade, stamp); nS++ } db.exec('COMMIT')
   console.log(`${ym}: ${list.length}開催`)
   await sleep(1000)
 }
@@ -127,7 +127,7 @@ let nA = 0
 for (const t of targets) {
   try {
     const list = parseAssen(await get(`https://www.boatrace.jp/owpc/pc/race/assen?jcd=${String(t.jcd).padStart(2, '0')}&hd=${t.start_date.replace(/-/g, '')}`))
-    db.exec('BEGIN')
+    db.exec('BEGIN IMMEDIATE')
     if (list.length) delA.run(t.jcd, t.start_date)   // 取れたときだけ入れ替える（空振りで消さない）
     for (const r of list) insA.run(t.jcd, t.start_date, r.racer_id, r.name, r.class, stamp)
     insF.run(t.jcd, t.start_date, stamp, list.length)
