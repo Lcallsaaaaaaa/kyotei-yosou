@@ -1,0 +1,30 @@
+# PCの外から、サイトが止まっていないかを見る係。
+#
+#   cd watch
+#   npx wrangler deploy                     置く
+#   npx wrangler secret put NTFY_TOPIC      通知先（data/ntfy.json の topic）
+#
+# ★なぜPCの外に置くのか（2026-09-27）
+#   欠品の見張り（kesson.mjs）も、予想を作るバッチも、全部が同じ1台のPCの上にある。
+#   そのPCが止まれば、処理も通知も一緒に止まり、**「異常なし」と「死んでいる」が
+#   区別できない**。9/20にはスリープで昼まで予想が出ず、有料のお客さんがいる日に
+#   誰も気づかなかった。だから**サイトだけを外から見る係**を1つ、外に置く。
+#
+# ⚠ LCall の Cloudflare 資産（lcall.shop / ecall.top / Workers / Pages の lcall・
+#   lcall-calltest）には絶対に触らない。name を書き換えないこと。
+name = "kyotei-watch"
+main = "src/index.js"
+compatibility_date = "2026-09-27"
+
+# 30分おき。UTCで指定するが、この式は毎時0分と30分なので時差は関係ない。
+[triggers]
+crons = ["*/30 * * * *"]
+
+[vars]
+# 見に行く先。データの最終更新時刻はここの meta.json に入っている。
+SITE = "https://kyotei-site.pages.dev"
+# 何分止まったら知らせるか。常駐は3分おきに送るので、45分は明らかな異常。
+STALE_MIN = "45"
+# 知らせる時間帯（日本時間）。深夜に鳴らしても直せないので黙る。
+FROM_HOUR = "8"
+TO_HOUR = "22"

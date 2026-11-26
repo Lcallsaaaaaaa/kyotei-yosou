@@ -19,14 +19,16 @@ https://boatrace-nagi.top/?k=SriO9mMfstcRuPexiWlbYS
 > 友だちだけが見られるメニューに置くので、ここが「友だちかどうか」の代わりになります。
 > SNSや記事に貼らないでください（貼ると誰でも開けます）。
 
-ほかのボタンは、普通のURLでかまいません。
+**鍵（`?k=`）が要るのは2つです。「今日の無料予想」と「注意アラート」。**
+アラートの中身（どのレースで鳴っているか）も友だち限定にしたので（2026-10-06）、
+鍵が無いと件数だけの画面になります。ほかのボタンは普通のURLでかまいません。
 
 | ボタン | URL |
 |---|---|
 | **今日の無料予想** | `https://boatrace-nagi.top/?k=SriO9mMfstcRuPexiWlbYS` |
 | データ分析 | `https://boatrace-nagi.top/analysis` |
 | ニュース | `https://boatrace-nagi.top/news` |
-| 注意アラート | `https://boatrace-nagi.top/alerts` |
+| **注意アラート** | `https://boatrace-nagi.top/alerts?k=SriO9mMfstcRuPexiWlbYS` |
 | 有料会員登録 | `https://boatrace-nagi.top/member` |
 | 問い合わせ | **URLでなく「メッセージ送信」を勧めます**（LINEの中で完結するため） |
 
